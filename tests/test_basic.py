@@ -93,9 +93,11 @@ async def test_api_root():
     """Test API root endpoint."""
     from backend.main import app
     from httpx import AsyncClient
+    from fastapi.testclient import TestClient
     
-    async with AsyncClient(app=app, base_url="http://test") as client:
-        response = await client.get("/")
+    # Use TestClient for testing FastAPI
+    with TestClient(app) as client:
+        response = client.get("/")
         assert response.status_code == 200
         assert response.json()["name"] == "AI-Klipperen API"
 

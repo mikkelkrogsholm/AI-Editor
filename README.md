@@ -1,5 +1,11 @@
 # 🎬 AI-Klipperen
 
+[![Tests](https://github.com/mikkelkrogsholm/AI-Editor/actions/workflows/tests.yml/badge.svg)](https://github.com/mikkelkrogsholm/AI-Editor/actions/workflows/tests.yml)
+[![codecov](https://codecov.io/gh/mikkelkrogsholm/AI-Editor/branch/main/graph/badge.svg)](https://codecov.io/gh/mikkelkrogsholm/AI-Editor)
+[![Python 3.12](https://img.shields.io/badge/python-3.12-blue.svg)](https://www.python.org/downloads/)
+[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
+[![Code style: black](https://img.shields.io/badge/code%20style-black-000000.svg)](https://github.com/psf/black)
+
 AI-powered video clipper and editor that uses local AI models to understand, search, and automatically edit videos.
 
 ## 🌟 Features
