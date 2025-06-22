@@ -16,8 +16,8 @@ class MockOllamaClient:
     def generate_caption(self, image_base64: str, model: str = "llava:latest") -> str:
         return "Test caption for video frame"
     
-    def generate_embedding(self, text: str, model: str = "nomic-embed-text:latest") -> list[float]:
-        return np.random.rand(768).tolist()
+    def generate_embedding(self, text: str, model: str = "snowflake-arctic-embed2:latest") -> list[float]:
+        return np.random.rand(1024).tolist()
     
     def transcribe_audio(self, audio_path: str, model: str = "whisper:base") -> list[dict]:
         return [

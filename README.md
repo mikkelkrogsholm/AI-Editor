@@ -54,9 +54,9 @@ brew install ollama  # On macOS
 
 6. **Download AI models:**
 ```bash
-ollama run minicpm-v:8b-2.6-q4_0  # Vision captioning
-ollama pull nomic-embed-text      # Text embeddings  
-ollama pull mistral:latest        # Chat and storyboarding
+ollama pull minicpm-v:8b-2.6-q4_0       # Vision captioning
+ollama pull snowflake-arctic-embed2     # Text embeddings  
+ollama pull deepseek-r1:32b             # Chat and storyboarding
 ```
 
 ## 🚀 Quick Start
@@ -170,9 +170,9 @@ ai-clip config --import my-config.json
 ### 3. Key Settings
 
 **Model Configuration:**
-- `vision_caption_model`: Model for image captioning (default: llava:latest)
-- `text_embedding_model`: Model for embeddings (default: nomic-embed-text:latest)
-- `chat_model`: Model for storyboard generation (default: mistral:latest)
+- `vision_caption_model`: Model for image captioning (default: minicpm-v:8b-2.6-q4_0)
+- `text_embedding_model`: Model for embeddings (default: snowflake-arctic-embed2:latest)
+- `chat_model`: Model for storyboard generation (default: deepseek-r1:32b)
 
 **Processing Settings:**
 - `frame_extraction_fps`: Frames per second to extract (default: 1.0)

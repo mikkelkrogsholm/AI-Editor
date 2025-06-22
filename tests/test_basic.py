@@ -28,7 +28,7 @@ def test_add_and_search_frame():
         
         # Add a test frame
         frame_id = "test_frame_001"
-        embedding = np.random.rand(768).tolist()
+        embedding = np.random.rand(1024).tolist()
         
         store.add_frame(
             frame_id=frame_id,

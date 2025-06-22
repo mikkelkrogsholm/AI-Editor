@@ -98,7 +98,7 @@ class OllamaClient:
             return response.json()["embedding"]
         else:
             logger.error(f"Embedding generation failed: {response.text}")
-            return [0.0] * 768  # Return zero vector as fallback
+            return [0.0] * 1024  # Return zero vector as fallback (arctic-embed2 dimension)
     
     def transcribe_audio(self, audio_path: str, model: str = "whisper:base") -> List[Dict[str, Any]]:
         """Transcribe audio using Whisper model (placeholder for actual implementation)."""

@@ -65,9 +65,9 @@ pytest tests/test_basic.py::test_vector_store_init -v  # Single test
 ## Key Technical Details
 
 ### Ollama Model Requirements
-- `llava:latest` - Vision captioning (fallback to any vision model)
-- `nomic-embed-text:latest` - Text embeddings (768-dim)
-- `mistral:latest` - Storyboard generation (or any chat model)
+- `minicpm-v:8b-2.6-q4_0` - Vision captioning (8B parameter vision model)
+- `snowflake-arctic-embed2:latest` - Text embeddings (1024-dim)
+- `deepseek-r1:32b` - Storyboard generation (32B reasoning model)
 
 ### Data Flow
 1. Video → FFmpeg → Frames + Audio

@@ -2,12 +2,12 @@
   "api_title": "AI-Klipperen API",
   "api_version": "1.0.0",
   "models": {
-    "vision_caption_model": "llava:latest",
-    "vision_caption_fallback": "llava:7b",
-    "text_embedding_model": "nomic-embed-text:latest",
-    "image_embedding_model": "nomic-embed-text:latest",
-    "chat_model": "mistral:latest",
-    "chat_model_fallback": "llama3.2:latest",
+    "vision_caption_model": "minicpm-v:8b-2.6-q4_0",
+    "vision_caption_fallback": "llava:latest",
+    "text_embedding_model": "snowflake-arctic-embed2:latest",
+    "image_embedding_model": "snowflake-arctic-embed2:latest",
+    "chat_model": "deepseek-r1:32b",
+    "chat_model_fallback": "mistral:latest",
     "asr_model": "whisper:base"
   },
   "processing": {

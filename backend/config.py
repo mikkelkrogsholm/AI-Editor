@@ -13,31 +13,35 @@ class ModelConfig(BaseSettings):
     
     # Vision models
     vision_caption_model: str = Field(
-        default="llava:latest",
+        default="minicpm-v:8b-2.6-q4_0",
         description="Model for generating image captions from video frames"
     )
     vision_caption_fallback: str = Field(
-        default="llava:7b",
+        default="llava:latest",
         description="Fallback model if primary vision model is not available"
     )
     
     # Embedding models
     text_embedding_model: str = Field(
-        default="nomic-embed-text:latest",
-        description="Model for generating text embeddings"
+        default="snowflake-arctic-embed2:latest",
+        description="Model for generating text embeddings (1024-dim)"
     )
     image_embedding_model: str = Field(
-        default="nomic-embed-text:latest",
-        description="Model for generating image embeddings (using text description)"
+        default="snowflake-arctic-embed2:latest",
+        description="Model for generating image embeddings from text (1024-dim)"
+    )
+    embedding_dimension: int = Field(
+        default=1024,
+        description="Dimension of embedding vectors (must match model output)"
     )
     
     # Language models
     chat_model: str = Field(
-        default="mistral:latest",
+        default="deepseek-r1:32b",
         description="Model for chat interactions and storyboard generation"
     )
     chat_model_fallback: str = Field(
-        default="llama3.2:latest",
+        default="mistral:latest",
         description="Fallback chat model"
     )
     
