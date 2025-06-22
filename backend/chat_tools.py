@@ -10,6 +10,7 @@ import logging
 
 from .vector import VectorStore
 from .pipeline import OllamaClient
+from .config import settings, get_model_with_fallback
 
 logger = logging.getLogger(__name__)
 
@@ -173,9 +174,18 @@ class StoryboardGenerator:
         prompt: str,
         project_name: str,
         duration_target: Optional[float] = None,
-        model: str = "mistral:latest"
+        model: str = None
     ) -> Storyboard:
         """Generate a complete storyboard from a text prompt."""
+        
+        # Get appropriate model
+        if model is None:
+            available = self.ollama.get_available_models()
+            model = get_model_with_fallback(
+                settings.models.chat_model,
+                settings.models.chat_model_fallback,
+                available
+            )
         
         # System prompt for the LLM
         system_prompt = f"""You are a professional video editor creating storyboards.

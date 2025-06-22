@@ -402,6 +402,96 @@ def version():
     ))
 
 
+@app.command()
+def config(
+    show: bool = typer.Option(False, "--show", "-s", help="Show current configuration"),
+    edit: bool = typer.Option(False, "--edit", "-e", help="Edit configuration interactively"),
+    export: Optional[Path] = typer.Option(None, "--export", help="Export config to file"),
+    import_file: Optional[Path] = typer.Option(None, "--import", help="Import config from file"),
+    list_models: bool = typer.Option(False, "--list-models", "-l", help="List available Ollama models")
+):
+    """Manage AI-Klipperen configuration."""
+    from backend.config import settings, Settings
+    from backend.pipeline import OllamaClient
+    
+    if list_models:
+        console.print("[cyan]Checking available Ollama models...[/cyan]")
+        try:
+            client = OllamaClient()
+            models = client.get_available_models()
+            
+            if models:
+                table = Table(title="Available Ollama Models")
+                table.add_column("Model Name", style="cyan")
+                table.add_column("Recommended For", style="white")
+                
+                # Categorize models
+                vision_models = [m for m in models if any(v in m for v in ["llava", "vision", "bakllava"])]
+                embed_models = [m for m in models if any(e in m for e in ["embed", "nomic", "bge", "e5"])]
+                chat_models = [m for m in models if any(c in m for c in ["llama", "mistral", "mixtral", "qwen", "phi"])]
+                
+                for model in vision_models:
+                    table.add_row(model, "Vision/Caption")
+                for model in embed_models:
+                    table.add_row(model, "Embeddings")
+                for model in chat_models:
+                    if model not in vision_models and model not in embed_models:
+                        table.add_row(model, "Chat/Storyboard")
+                
+                console.print(table)
+            else:
+                console.print("[yellow]No models found. Make sure Ollama is running.[/yellow]")
+                
+        except Exception as e:
+            console.print(f"[red]Error connecting to Ollama: {e}[/red]")
+            
+    elif show:
+        console.print(Panel.fit("[bold cyan]Current Configuration[/bold cyan]"))
+        
+        # Models
+        console.print("\n[yellow]Models:[/yellow]")
+        console.print(f"  Vision: {settings.models.vision_caption_model}")
+        console.print(f"  Embeddings: {settings.models.text_embedding_model}")
+        console.print(f"  Chat: {settings.models.chat_model}")
+        
+        # Processing
+        console.print("\n[yellow]Processing:[/yellow]")
+        console.print(f"  Frame extraction: {settings.processing.frame_extraction_fps} fps")
+        console.print(f"  Quality threshold: {settings.processing.default_quality_threshold}")
+        
+        # Render
+        console.print("\n[yellow]Rendering:[/yellow]")
+        console.print(f"  Preview: {settings.render.preview_resolution} @ {settings.render.preview_fps}fps")
+        console.print(f"  Final: {settings.render.final_resolution} @ {settings.render.final_fps}fps")
+        
+    elif export:
+        settings.save_to_file(str(export))
+        console.print(f"[green]Configuration exported to: {export}[/green]")
+        
+    elif import_file:
+        if not import_file.exists():
+            console.print(f"[red]File not found: {import_file}[/red]")
+            raise typer.Exit(1)
+            
+        try:
+            new_settings = Settings.load_from_file(str(import_file))
+            # Save as default
+            new_settings.save_to_file("config.json")
+            console.print(f"[green]Configuration imported from: {import_file}[/green]")
+        except Exception as e:
+            console.print(f"[red]Failed to import config: {e}[/red]")
+            raise typer.Exit(1)
+            
+    elif edit:
+        console.print("[yellow]Interactive config editing not yet implemented.[/yellow]")
+        console.print("Please edit config.json or use environment variables.")
+        
+    else:
+        # Show help if no options
+        console.print("Use --show to view config, --list-models to see available models")
+        console.print("See 'ai-clip config --help' for all options")
+
+
 def main():
     """Main entry point for the CLI."""
     app()

@@ -13,6 +13,7 @@ from datetime import timedelta
 
 from .chat_tools import Storyboard, ClipSegment
 from .vector import VectorStore
+from .config import settings
 
 logger = logging.getLogger(__name__)
 
@@ -117,11 +118,19 @@ class VideoRenderer:
         self,
         storyboard: Storyboard,
         output_path: str,
-        resolution: Tuple[int, int] = (640, 360),
-        fps: int = 24,
-        watermark: bool = True
+        resolution: Tuple[int, int] = None,
+        fps: int = None,
+        watermark: bool = None
     ) -> str:
         """Render a low-resolution preview of the storyboard."""
+        # Use config defaults if not specified
+        if resolution is None:
+            resolution = settings.render.preview_resolution
+        if fps is None:
+            fps = settings.render.preview_fps
+        if watermark is None:
+            watermark = settings.render.preview_watermark
+            
         try:
             logger.info(f"Rendering preview for {storyboard.project_name}")
             
@@ -212,12 +221,22 @@ class VideoRenderer:
         self,
         storyboard: Storyboard,
         output_path: str,
-        resolution: Tuple[int, int] = (1920, 1080),
-        fps: int = 30,
-        bitrate: str = "10M",
-        preset: str = "slow"
+        resolution: Tuple[int, int] = None,
+        fps: int = None,
+        bitrate: str = None,
+        preset: str = None
     ) -> str:
         """Render the final high-quality video."""
+        # Use config defaults if not specified
+        if resolution is None:
+            resolution = settings.render.final_resolution
+        if fps is None:
+            fps = settings.render.final_fps
+        if bitrate is None:
+            bitrate = settings.render.final_bitrate
+        if preset is None:
+            preset = settings.render.final_preset
+            
         try:
             logger.info(f"Rendering final video for {storyboard.project_name}")
             

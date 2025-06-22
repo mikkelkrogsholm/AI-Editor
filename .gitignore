@@ -9,6 +9,11 @@ env/
 ENV/
 .venv
 
+# Environment
+.env
+.env.local
+.env.*.local
+
 # IDE
 .vscode/
 .idea/
@@ -28,6 +33,9 @@ outputs/
 *.json
 !requirements.txt
 !setup.py
+!config.example.json
+config.json
+ai_clip_config.json
 
 # Temporary files
 *.tmp

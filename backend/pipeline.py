@@ -19,6 +19,7 @@ from concurrent.futures import ThreadPoolExecutor
 import logging
 
 from .vector import VectorStore
+from .config import settings, get_model_with_fallback
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
@@ -27,12 +28,36 @@ logger = logging.getLogger(__name__)
 class OllamaClient:
     """Client for interacting with Ollama API."""
     
-    def __init__(self, base_url: str = "http://localhost:11434"):
-        self.base_url = base_url
-        self.client = httpx.Client(timeout=300.0)
+    def __init__(self, base_url: str = None):
+        self.base_url = base_url or settings.ollama.host
+        self.client = httpx.Client(timeout=settings.ollama.timeout)
+        self._available_models = None
     
-    def generate_caption(self, image_base64: str, model: str = "llava:latest") -> str:
+    def get_available_models(self) -> List[str]:
+        """Get list of available models from Ollama."""
+        if self._available_models is None:
+            try:
+                response = self.client.get(f"{self.base_url}/api/tags")
+                if response.status_code == 200:
+                    models = response.json().get("models", [])
+                    self._available_models = [m["name"] for m in models]
+                else:
+                    self._available_models = []
+            except Exception as e:
+                logger.error(f"Failed to get available models: {e}")
+                self._available_models = []
+        return self._available_models
+    
+    def generate_caption(self, image_base64: str, model: str = None) -> str:
         """Generate caption for an image using vision model."""
+        if model is None:
+            available = self.get_available_models()
+            model = get_model_with_fallback(
+                settings.models.vision_caption_model,
+                settings.models.vision_caption_fallback,
+                available
+            )
+        
         prompt = "Describe this video frame in detail. Focus on: people, actions, objects, setting, mood, and visual quality. Be concise but comprehensive."
         
         response = self.client.post(
@@ -51,8 +76,16 @@ class OllamaClient:
             logger.error(f"Caption generation failed: {response.text}")
             return "Failed to generate caption"
     
-    def generate_embedding(self, text: str, model: str = "nomic-embed-text:latest") -> List[float]:
+    def generate_embedding(self, text: str, model: str = None) -> List[float]:
         """Generate text embedding using Ollama."""
+        if model is None:
+            available = self.get_available_models()
+            model = get_model_with_fallback(
+                settings.models.text_embedding_model,
+                settings.models.text_embedding_model,  # Use same as fallback
+                available
+            )
+        
         response = self.client.post(
             f"{self.base_url}/api/embeddings",
             json={
@@ -94,8 +127,11 @@ class VideoPipeline:
         if hasattr(self, 'temp_dir') and self.temp_dir.exists():
             shutil.rmtree(self.temp_dir)
     
-    def extract_frames(self, video_path: str, fps: float = 1.0) -> Generator[Tuple[float, Path], None, None]:
+    def extract_frames(self, video_path: str, fps: float = None) -> Generator[Tuple[float, Path], None, None]:
         """Extract frames from video at specified FPS."""
+        if fps is None:
+            fps = settings.processing.frame_extraction_fps
+            
         video_path = Path(video_path)
         output_pattern = str(self.temp_dir / f"{video_path.stem}_frame_%06d.jpg")
         
@@ -108,7 +144,7 @@ class VideoPipeline:
             # Extract frames
             stream = ffmpeg.input(str(video_path))
             stream = ffmpeg.filter(stream, 'fps', fps=fps)
-            stream = ffmpeg.output(stream, output_pattern, **{'qscale:v': 2})
+            stream = ffmpeg.output(stream, output_pattern, **{'qscale:v': settings.processing.frame_quality})
             ffmpeg.run(stream, quiet=True, overwrite_output=True)
             
             # Yield frames with timestamps

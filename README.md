@@ -137,16 +137,54 @@ ai-klipperen/
 
 ## 🔧 Configuration
 
-### Environment Variables
+AI-Klipperen supports multiple configuration methods:
 
-- `OLLAMA_HOST`: Ollama server URL (default: http://localhost:11434)
-- `CHROMA_PERSIST_DIR`: ChromaDB storage location (default: ./chroma_db)
+### 1. Configuration Files
 
-### Processing Settings
+Copy `config.example.json` to `config.json` and customize:
+```bash
+cp config.example.json config.json
+```
 
-- Frame extraction: 1 FPS by default
-- Video formats: MP4, MOV, AVI, MKV, WebM
-- Output format: MP4 (H.264)
+Or use environment variables by copying `.env.example`:
+```bash
+cp .env.example .env
+```
+
+### 2. CLI Configuration Management
+
+```bash
+# Show current configuration
+ai-clip config --show
+
+# List available Ollama models
+ai-clip config --list-models
+
+# Export configuration
+ai-clip config --export my-config.json
+
+# Import configuration
+ai-clip config --import my-config.json
+```
+
+### 3. Key Settings
+
+**Model Configuration:**
+- `vision_caption_model`: Model for image captioning (default: llava:latest)
+- `text_embedding_model`: Model for embeddings (default: nomic-embed-text:latest)
+- `chat_model`: Model for storyboard generation (default: mistral:latest)
+
+**Processing Settings:**
+- `frame_extraction_fps`: Frames per second to extract (default: 1.0)
+- `default_quality_threshold`: Minimum quality for search (default: 5.0)
+
+**Render Settings:**
+- Preview: 640x360 @ 24fps with watermark
+- Final: 1920x1080 @ 30fps, 10Mbps bitrate
+
+### 4. Model Fallbacks
+
+The system automatically falls back to available models if the configured model isn't found. You can specify fallback models in the configuration.
 
 ## 🧪 Testing
 

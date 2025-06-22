@@ -1,0 +1,49 @@
+{
+  "api_title": "AI-Klipperen API",
+  "api_version": "1.0.0",
+  "models": {
+    "vision_caption_model": "llava:latest",
+    "vision_caption_fallback": "llava:7b",
+    "text_embedding_model": "nomic-embed-text:latest",
+    "image_embedding_model": "nomic-embed-text:latest",
+    "chat_model": "mistral:latest",
+    "chat_model_fallback": "llama3.2:latest",
+    "asr_model": "whisper:base"
+  },
+  "processing": {
+    "frame_extraction_fps": 1.0,
+    "frame_quality": 2,
+    "audio_sample_rate": 16000,
+    "audio_channels": 1,
+    "default_quality_threshold": 5.0,
+    "batch_size": 10,
+    "max_workers": 4
+  },
+  "storage": {
+    "chroma_persist_dir": "./chroma_db",
+    "temp_dir": null,
+    "upload_dir": "./uploads",
+    "output_dir": "./outputs",
+    "max_upload_size": 5368709120
+  },
+  "ollama": {
+    "host": "http://localhost:11434",
+    "timeout": 300.0,
+    "max_retries": 3
+  },
+  "render": {
+    "preview_resolution": [640, 360],
+    "preview_fps": 24,
+    "preview_watermark": true,
+    "final_resolution": [1920, 1080],
+    "final_fps": 30,
+    "final_bitrate": "10M",
+    "final_preset": "slow",
+    "video_codec": "libx264",
+    "audio_codec": "aac",
+    "audio_bitrate": "192k",
+    "default_transition_duration": 1.0
+  },
+  "enable_asr": false,
+  "enable_gpu": true
+}
