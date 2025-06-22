@@ -8,7 +8,8 @@
     "image_embedding_model": "snowflake-arctic-embed2:latest",
     "chat_model": "deepseek-r1:32b",
     "chat_model_fallback": "mistral:latest",
-    "asr_model": "whisper:base",
+    "asr_model": "whisper.cpp",
+    "asr_model_size": "base",
     "embedding_dimension": 1024
   },
   "processing": {

@@ -135,6 +135,28 @@ ai-klipperen/
     └── test_*.py      # Unit tests
 ```
 
+## 🎙️ Audio Transcription (ASR)
+
+Since Ollama doesn't support audio models yet, AI-Klipperen provides integration with:
+
+### Recommended: whisper.cpp
+Fast C++ implementation of Whisper:
+```bash
+git clone https://github.com/ggerganov/whisper.cpp
+cd whisper.cpp
+make
+
+# Download model
+bash ./models/download-ggml-model.sh base
+
+# Enable ASR in config
+AI_CLIP_ENABLE_ASR=true
+```
+
+### Alternative Options:
+- **faster-whisper**: `pip install faster-whisper` (GPU accelerated)
+- **openai-whisper**: `pip install openai-whisper` (original implementation)
+
 ## 🔧 Configuration
 
 AI-Klipperen supports multiple configuration methods:

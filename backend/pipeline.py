@@ -124,15 +124,29 @@ class OllamaClient:
         except:
             return settings.models.embedding_dimension
     
-    def transcribe_audio(self, audio_path: str, model: str = "whisper:base") -> List[Dict[str, Any]]:
-        """Transcribe audio using Whisper model (placeholder for actual implementation)."""
-        # Note: Ollama doesn't directly support audio models yet
-        # This is a placeholder that would need integration with whisper.cpp or similar
+    def transcribe_audio(self, audio_path: str, model_size: str = None) -> List[Dict[str, Any]]:
+        """Transcribe audio using Whisper (placeholder for actual implementation).
+        
+        Note: Ollama doesn't support audio models yet. This would need integration with:
+        - whisper.cpp (https://github.com/ggerganov/whisper.cpp) - Recommended
+        - openai-whisper Python package
+        - faster-whisper for better performance
+        
+        Example whisper.cpp command:
+        ./main -m models/ggml-base.bin -f audio.wav --output-json
+        """
+        if model_size is None:
+            model_size = settings.models.asr_model_size
+            
+        logger.warning("ASR transcription not implemented. Ollama doesn't support audio models yet.")
+        logger.info(f"Would use whisper.cpp with {model_size} model for: {audio_path}")
+        
+        # Return placeholder for development
         return [
             {
                 "start": 0.0,
                 "end": 5.0,
-                "text": "Placeholder transcription",
+                "text": "[Transcription placeholder - whisper.cpp integration needed]",
                 "speaker": "Unknown"
             }
         ]
@@ -338,9 +352,19 @@ class VideoPipeline:
                     logger.error(f"Failed to process frame at {timestamp}: {e}")
                     stats["errors"].append(f"Frame {timestamp}: {str(e)}")
             
-            # Process audio (placeholder)
+            # Process audio
             logger.info("Processing audio...")
-            asr_segments = self.ollama.transcribe_audio(str(audio_path))
+            if settings.enable_asr:
+                try:
+                    from .asr import get_transcriber
+                    transcriber = get_transcriber()
+                    asr_segments = transcriber.transcribe(str(audio_path))
+                except Exception as e:
+                    logger.warning(f"ASR transcription failed: {e}")
+                    asr_segments = []
+            else:
+                logger.info("ASR disabled in settings")
+                asr_segments = []
             
             for i, segment in enumerate(asr_segments):
                 try:

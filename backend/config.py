@@ -45,10 +45,14 @@ class ModelConfig(BaseSettings):
         description="Fallback chat model"
     )
     
-    # Audio models
+    # Audio models (Note: Ollama doesn't support audio models yet)
     asr_model: str = Field(
-        default="whisper:base",
-        description="Model for audio transcription (ASR)"
+        default="whisper.cpp",
+        description="ASR implementation to use (whisper.cpp recommended for local processing)"
+    )
+    asr_model_size: str = Field(
+        default="base",
+        description="Whisper model size: tiny, base, small, medium, large"
     )
     
     model_config = {
