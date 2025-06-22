@@ -32,7 +32,7 @@ class ModelConfig(BaseSettings):
     )
     embedding_dimension: int = Field(
         default=1024,
-        description="Dimension of embedding vectors (must match model output)"
+        description="Default dimension of embedding vectors (snowflake-arctic-embed2 uses 1024)"
     )
     
     # Language models

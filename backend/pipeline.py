@@ -32,6 +32,7 @@ class OllamaClient:
         self.base_url = base_url or settings.ollama.host
         self.client = httpx.Client(timeout=settings.ollama.timeout)
         self._available_models = None
+        self._embedding_dimensions = {}
     
     def get_available_models(self) -> List[str]:
         """Get list of available models from Ollama."""
@@ -95,10 +96,33 @@ class OllamaClient:
         )
         
         if response.status_code == 200:
-            return response.json()["embedding"]
+            embedding = response.json()["embedding"]
+            # Cache the dimension for this model
+            if model not in self._embedding_dimensions:
+                self._embedding_dimensions[model] = len(embedding)
+                logger.info(f"Model {model} has embedding dimension: {len(embedding)}")
+            return embedding
         else:
             logger.error(f"Embedding generation failed: {response.text}")
-            return [0.0] * 1024  # Return zero vector as fallback (arctic-embed2 dimension)
+            # Try to use cached dimension or default
+            dim = self._embedding_dimensions.get(model, settings.models.embedding_dimension)
+            return [0.0] * dim  # Return zero vector as fallback
+    
+    def get_embedding_dimension(self, model: str = None) -> int:
+        """Get the embedding dimension for a model."""
+        if model is None:
+            model = settings.models.text_embedding_model
+        
+        # Check cache first
+        if model in self._embedding_dimensions:
+            return self._embedding_dimensions[model]
+        
+        # Generate a test embedding to get dimension
+        try:
+            embedding = self.generate_embedding("test", model)
+            return len(embedding)
+        except:
+            return settings.models.embedding_dimension
     
     def transcribe_audio(self, audio_path: str, model: str = "whisper:base") -> List[Dict[str, Any]]:
         """Transcribe audio using Whisper model (placeholder for actual implementation)."""
