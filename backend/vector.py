@@ -124,22 +124,30 @@ class VectorStore:
         min_resolution: Optional[str] = None
     ) -> List[Dict[str, Any]]:
         """Search for similar frames based on embedding similarity."""
-        where_clause = {}
+        # Build where clause with AND operator for multiple conditions
+        where_conditions = []
         if quality_threshold:
-            where_clause["quality"] = {"$gte": quality_threshold}
+            where_conditions.append({"quality": {"$gte": quality_threshold}})
         if project:
-            where_clause["project"] = {"$eq": project}
+            where_conditions.append({"project": {"$eq": project}})
         if aspect_ratio:
-            where_clause["aspect_ratio"] = {"$eq": aspect_ratio}
+            where_conditions.append({"aspect_ratio": {"$eq": aspect_ratio}})
         if orientation:
-            where_clause["orientation"] = {"$eq": orientation}
+            where_conditions.append({"orientation": {"$eq": orientation}})
         if min_resolution:
-            where_clause["resolution_name"] = {"$eq": min_resolution}
+            where_conditions.append({"resolution_name": {"$eq": min_resolution}})
+        
+        # Construct the where clause
+        where_clause = None
+        if len(where_conditions) > 1:
+            where_clause = {"$and": where_conditions}
+        elif len(where_conditions) == 1:
+            where_clause = where_conditions[0]
         
         results = self.frame_collection.query(
             query_embeddings=[query_embedding],
             n_results=n_results,
-            where=where_clause if where_clause else None
+            where=where_clause
         )
         
         # Post-process results to filter by tags if specified
@@ -172,12 +180,21 @@ class VectorStore:
         self,
         query_embedding: List[float],
         n_results: int = 10,
-        speaker_filter: Optional[str] = None
+        speaker_filter: Optional[str] = None,
+        project: Optional[str] = None
     ) -> List[Dict[str, Any]]:
         """Search for similar ASR segments."""
-        where_clause = {}
+        where_conditions = []
         if speaker_filter:
-            where_clause["speaker"] = {"$eq": speaker_filter}
+            where_conditions.append({"speaker": {"$eq": speaker_filter}})
+        if project:
+            where_conditions.append({"project": {"$eq": project}})
+        
+        where_clause = None
+        if len(where_conditions) > 1:
+            where_clause = {"$and": where_conditions}
+        elif len(where_conditions) == 1:
+            where_clause = where_conditions[0]
         
         results = self.asr_collection.query(
             query_embeddings=[query_embedding],

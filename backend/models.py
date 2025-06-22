@@ -124,11 +124,13 @@ class SearchResult(BaseModel):
     media_metadata: Optional[MediaMetadata] = None
 
 
+from typing import Literal
+
 class ImportAssetRequest(BaseModel):
     """Request to import an asset into a project."""
     file_path: str
     project: str
-    asset_type: str = Field(..., regex="^(video|audio_music|audio_voiceover|still_logo|still_graphic|still_photo)$")
+    asset_type: Literal["video", "audio_music", "audio_voiceover", "still_logo", "still_graphic", "still_photo"]
 
 
 class ProjectProcessRequest(BaseModel):

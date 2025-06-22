@@ -20,6 +20,22 @@ AI-powered video clipper and editor that uses local AI models to understand, sea
 - **Automated Editing**: Render professional videos with transitions
 - **Multiple Interfaces**: CLI, Web API, and Streamlit UI
 
+## 📌 Current Status
+
+**Working Features:**
+- ✅ Project-based storage and organization
+- ✅ Video import and processing
+- ✅ Frame extraction and AI analysis
+- ✅ Clip extraction (10-second segments)
+- ✅ Technical metadata extraction
+- ✅ Semantic search with filters
+- ✅ Storyboard generation via chat
+- ✅ Streamlit UI with project management
+
+**Known Issues:**
+- ⚠️ Video rendering fails with MoviePy/ImageMagick error
+- ⚠️ Audio/ASR processing not yet implemented (waiting for Ollama support)
+
 ## 🖥️ System Requirements
 
 - MacBook Pro (M3 Pro or similar) with 128GB unified memory
@@ -73,7 +89,8 @@ ai-clip project create myproject
 ### 2. Start the API server:
 ```bash
 ai-clip server
-# Or directly with: uvicorn backend.main:app --reload
+# Or directly with: uvicorn backend.main:app --port 8765
+# Note: Server runs on port 8765 by default
 ```
 
 ### 3. Import and process videos:

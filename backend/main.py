@@ -525,7 +525,7 @@ async def process_project_videos(project_name: str, job_id: str):
 
 
 @app.post("/projects/{project_name}/process")
-async def process_project(project_name: str, request: ProjectProcessRequest, background_tasks: BackgroundTasks):
+async def process_project(project_name: str, background_tasks: BackgroundTasks, force: bool = False):
     """Process all unprocessed videos in a project."""
     try:
         # Check if project exists
@@ -534,7 +534,7 @@ async def process_project(project_name: str, request: ProjectProcessRequest, bac
         # Get unprocessed videos
         unprocessed = project_manager.get_unprocessed_videos(project_name)
         
-        if not unprocessed and not request.force:
+        if not unprocessed and not force:
             return {
                 "message": "No unprocessed videos found",
                 "videos_to_process": 0,
@@ -560,6 +560,45 @@ async def process_project(project_name: str, request: ProjectProcessRequest, bac
         raise HTTPException(status_code=500, detail=str(e))
 
 
+@app.get("/projects/{project_name}/storyboards")
+async def list_storyboards(project_name: str):
+    """List all storyboards in a project."""
+    try:
+        storyboards = project_manager.list_storyboards(project_name)
+        return storyboards
+    except ValueError as e:
+        raise HTTPException(status_code=404, detail=str(e))
+    except Exception as e:
+        logger.error(f"Failed to list storyboards: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.post("/projects/{project_name}/storyboards")
+async def save_storyboard(project_name: str, storyboard: Dict[str, Any] = Body(...)):
+    """Save a storyboard to a project."""
+    try:
+        filename = project_manager.save_storyboard(project_name, storyboard)
+        return {"filename": filename, "message": "Storyboard saved successfully"}
+    except ValueError as e:
+        raise HTTPException(status_code=404, detail=str(e))
+    except Exception as e:
+        logger.error(f"Failed to save storyboard: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.get("/projects/{project_name}/storyboards/{filename}")
+async def load_storyboard(project_name: str, filename: str):
+    """Load a specific storyboard."""
+    try:
+        storyboard = project_manager.load_storyboard(project_name, filename)
+        return storyboard
+    except ValueError as e:
+        raise HTTPException(status_code=404, detail=str(e))
+    except Exception as e:
+        logger.error(f"Failed to load storyboard: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
 if __name__ == "__main__":
     import uvicorn
-    uvicorn.run(app, host="0.0.0.0", port=8000)
+    uvicorn.run(app, host="0.0.0.0", port=8765)

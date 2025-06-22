@@ -24,7 +24,7 @@ app = typer.Typer(
 console = Console()
 
 # API base URL
-API_BASE_URL = "http://localhost:8000"
+API_BASE_URL = "http://localhost:8765"
 
 
 def wait_for_job(job_id: str, job_type: str = "processing") -> bool:
@@ -228,6 +228,7 @@ def storyboard(
             f"{API_BASE_URL}/chat",
             json={
                 "message": prompt,
+                "project_name": project,
                 "conversation_id": f"storyboard_{int(time.time())}",
                 "target_duration": duration
             }
@@ -361,7 +362,7 @@ def render(
 @app.command()
 def server(
     host: str = typer.Option("0.0.0.0", "--host", "-h", help="Host to bind to"),
-    port: int = typer.Option(8000, "--port", "-p", help="Port to bind to"),
+    port: int = typer.Option(8765, "--port", "-p", help="Port to bind to"),
     reload: bool = typer.Option(False, "--reload", "-r", help="Enable auto-reload")
 ):
     """Start the API server."""

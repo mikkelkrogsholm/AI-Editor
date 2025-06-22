@@ -111,3 +111,59 @@ Long-running operations (ingest, render) use FastAPI BackgroundTasks with job st
 - ASR/transcription is placeholder - ready for Whisper integration
 - All video paths must be absolute, not relative
 - Temporary files are auto-cleaned in pipeline and render modules
+
+## Session Notes (2025-01-06)
+
+### Completed:
+- ✅ Implemented complete project-based storage system with organized folders
+- ✅ Added technical metadata extraction (resolution, aspect ratio, FPS, codecs)
+- ✅ Created clip extraction (10-second segments with 2-second overlap)
+- ✅ Enhanced search with filters for aspect ratio, orientation, resolution
+- ✅ Updated CLI with project management commands
+- ✅ Added support for multiple asset types (video, audio, stills)
+- ✅ Changed default port from 8000 to 8765 to avoid conflicts
+- ✅ Fixed server connection issue - server now runs properly on port 8765
+
+## Session Notes (2025-06-22/23)
+
+### Completed Today:
+- ✅ Successfully tested project system with user's videos
+- ✅ Processed 2 videos, created 7 clips, analyzed 46 frames
+- ✅ Fixed UI to use project dropdown instead of text input
+- ✅ Implemented automatic storyboard saving to projects
+- ✅ Added storyboard browser in render page
+- ✅ Fixed ChromaDB query issue with multiple filters (using $and operator)
+- ✅ Chat-based storyboard generation working correctly
+- ✅ All Danish UI improvements implemented
+
+### Current Blocker - MoviePy/ImageMagick Rendering:
+**Error**: `[Errno 2] No such file or directory: 'unset'`
+- ImageMagick is installed (`/opt/homebrew/bin/magick`)
+- Individual clip tests work fine in isolation
+- Full rendering pipeline fails on the last clip
+- Tried multiple fixes without success:
+  - Setting IMAGEMAGICK_BINARY environment variable
+  - Configuring MoviePy settings before import
+  - Disabling watermarks (preview_watermark=False)
+  - Removing all transitions
+  - Using concatenate_videoclips instead of CompositeVideoClip
+
+### TODO When Returning:
+1. **Fix Rendering Issue** (Priority #1):
+   ```bash
+   # Option 1: Use pure FFmpeg instead of MoviePy
+   # Option 2: Debug the environment variable issue
+   # Option 3: Try different MoviePy version
+   pip install moviepy==1.0.3  # Try older stable version
+   ```
+
+2. **Complete Testing**:
+   - Once rendering works, test full pipeline end-to-end
+   - Verify preview and final render modes
+   - Test with different video formats
+
+3. **Future Features**:
+   - Audio/ASR processing (when Ollama supports it)
+   - Advanced editing (color correction, effects)
+   - Timeline editor UI
+   - Multiple export formats

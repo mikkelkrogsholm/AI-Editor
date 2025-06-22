@@ -7,6 +7,7 @@ from pathlib import Path
 from typing import List, Dict, Any, Optional
 from datetime import datetime
 import logging
+import re
 
 from .config import settings
 
@@ -20,8 +21,15 @@ class ProjectManager:
         self.base_dir = Path(base_dir) if base_dir else Path(settings.storage.projects_dir)
         self.base_dir.mkdir(parents=True, exist_ok=True)
     
+    def _is_valid_name(self, name: str) -> bool:
+        """Check if project name is valid."""
+        return bool(re.match(r'^[a-zA-Z0-9_-]+$', name))
+    
     def create_project(self, name: str) -> Dict[str, Any]:
         """Create a new project with folder structure."""
+        if not self._is_valid_name(name):
+            raise ValueError("Project name can only contain letters, numbers, hyphens, and underscores")
+        
         project_path = self.base_dir / name
         
         if project_path.exists():
@@ -38,7 +46,8 @@ class ProjectManager:
             "stills/logos",
             "stills/graphics",
             "stills/photos",
-            "renders"
+            "renders",
+            "storyboards"
         ]
         
         for folder in folders:
@@ -60,7 +69,8 @@ class ProjectManager:
                     "logos": [],
                     "graphics": [],
                     "photos": []
-                }
+                },
+                "storyboards": []
             },
             "stats": {
                 "total_videos": 0,
@@ -173,7 +183,8 @@ class ProjectManager:
             "still_logos": "stills/logos",
             "still_graphics": "stills/graphics",
             "still_photos": "stills/photos",
-            "renders": "renders"
+            "renders": "renders",
+            "storyboards": "storyboards"
         }
         
         # Filter by type if specified
@@ -253,3 +264,72 @@ class ProjectManager:
         
         with open(metadata_path, 'w') as f:
             json.dump(metadata, f, indent=2)
+    
+    def save_storyboard(self, project_name: str, storyboard: Dict[str, Any]) -> str:
+        """Save a storyboard to the project."""
+        project_path = self.get_project_path(project_name)
+        storyboards_dir = project_path / "storyboards"
+        storyboards_dir.mkdir(exist_ok=True)
+        
+        # Generate filename with timestamp
+        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+        filename = f"storyboard_{timestamp}.json"
+        filepath = storyboards_dir / filename
+        
+        # Add metadata
+        storyboard_with_meta = {
+            **storyboard,
+            "created": datetime.now().isoformat(),
+            "filename": filename
+        }
+        
+        # Save storyboard
+        with open(filepath, 'w') as f:
+            json.dump(storyboard_with_meta, f, indent=2)
+        
+        # Update project metadata
+        metadata_path = project_path / "metadata.json"
+        with open(metadata_path, 'r') as f:
+            metadata = json.load(f)
+        
+        if "storyboards" not in metadata["assets"]:
+            metadata["assets"]["storyboards"] = []
+        
+        metadata["assets"]["storyboards"].append({
+            "filename": filename,
+            "created": storyboard_with_meta["created"],
+            "duration": storyboard.get("duration", 0),
+            "clips": len(storyboard.get("timeline", [])),
+            "notes": storyboard.get("notes", "")
+        })
+        
+        metadata["updated"] = datetime.now().isoformat()
+        
+        with open(metadata_path, 'w') as f:
+            json.dump(metadata, f, indent=2)
+        
+        logger.info(f"Saved storyboard: {filename} to project {project_name}")
+        return filename
+    
+    def list_storyboards(self, project_name: str) -> List[Dict[str, Any]]:
+        """List all storyboards in a project."""
+        project_path = self.get_project_path(project_name)
+        metadata_path = project_path / "metadata.json"
+        
+        if metadata_path.exists():
+            with open(metadata_path, 'r') as f:
+                metadata = json.load(f)
+            return metadata.get("assets", {}).get("storyboards", [])
+        
+        return []
+    
+    def load_storyboard(self, project_name: str, filename: str) -> Dict[str, Any]:
+        """Load a specific storyboard."""
+        project_path = self.get_project_path(project_name)
+        storyboard_path = project_path / "storyboards" / filename
+        
+        if not storyboard_path.exists():
+            raise ValueError(f"Storyboard not found: {filename}")
+        
+        with open(storyboard_path, 'r') as f:
+            return json.load(f)

@@ -20,17 +20,21 @@ st.set_page_config(
 )
 
 # API configuration
-API_BASE_URL = "http://localhost:8000"
+API_BASE_URL = "http://localhost:8765"
 
 # Initialize session state
 if "current_project" not in st.session_state:
-    st.session_state.current_project = "default"
+    st.session_state.current_project = "test-project"
 if "chat_history" not in st.session_state:
     st.session_state.chat_history = []
 if "current_storyboard" not in st.session_state:
     st.session_state.current_storyboard = None
 if "job_status" not in st.session_state:
     st.session_state.job_status = {}
+if "projects" not in st.session_state:
+    st.session_state.projects = []
+if "saved_storyboards" not in st.session_state:
+    st.session_state.saved_storyboards = []
 
 
 def check_api_connection():
@@ -40,6 +44,28 @@ def check_api_connection():
         return response.status_code == 200
     except:
         return False
+
+
+def load_projects():
+    """Load available projects from API."""
+    try:
+        response = httpx.get(f"{API_BASE_URL}/projects", timeout=5.0)
+        if response.status_code == 200:
+            return response.json()
+        return []
+    except:
+        return []
+
+
+def load_project_storyboards(project_name: str):
+    """Load saved storyboards for a project."""
+    try:
+        response = httpx.get(f"{API_BASE_URL}/projects/{project_name}/storyboards", timeout=5.0)
+        if response.status_code == 200:
+            return response.json()
+        return []
+    except:
+        return []
 
 
 def main():
@@ -56,11 +82,70 @@ def main():
     with st.sidebar:
         st.header("Project Settings")
         
+        # Load projects
+        if not st.session_state.projects:
+            st.session_state.projects = load_projects()
+        
         # Project selection
-        st.session_state.current_project = st.text_input(
-            "Project Name",
-            value=st.session_state.current_project
-        )
+        project_names = [p["name"] for p in st.session_state.projects]
+        if project_names:
+            # Add option to create new project
+            project_options = project_names + ["➕ Create New Project"]
+            
+            selected = st.selectbox(
+                "Select Project",
+                options=project_options,
+                index=project_options.index(st.session_state.current_project) if st.session_state.current_project in project_options else 0
+            )
+            
+            if selected == "➕ Create New Project":
+                new_project_name = st.text_input("New Project Name")
+                if st.button("Create Project") and new_project_name:
+                    try:
+                        response = httpx.post(
+                            f"{API_BASE_URL}/projects/create",
+                            json={"name": new_project_name}
+                        )
+                        if response.status_code == 200:
+                            st.success(f"✅ Created project: {new_project_name}")
+                            st.session_state.current_project = new_project_name
+                            st.session_state.projects = load_projects()
+                            st.rerun()
+                        else:
+                            st.error(f"Failed to create project: {response.json().get('detail')}")
+                    except Exception as e:
+                        st.error(f"Error: {e}")
+            else:
+                st.session_state.current_project = selected
+                
+                # Show project stats
+                current_proj = next((p for p in st.session_state.projects if p["name"] == selected), None)
+                if current_proj and current_proj.get("stats"):
+                    col1, col2 = st.columns(2)
+                    with col1:
+                        st.metric("Videos", current_proj["stats"].get("total_videos", 0))
+                        st.metric("Clips", current_proj["stats"].get("total_clips", 0))
+                    with col2:
+                        st.metric("Frames", current_proj["stats"].get("total_frames", 0))
+                        st.metric("Duration", f"{current_proj['stats'].get('total_duration', 0):.1f}s")
+        else:
+            st.info("No projects found. Create one first.")
+            new_project_name = st.text_input("Project Name")
+            if st.button("Create Project") and new_project_name:
+                try:
+                    response = httpx.post(
+                        f"{API_BASE_URL}/projects/create",
+                        json={"name": new_project_name}
+                    )
+                    if response.status_code == 200:
+                        st.success(f"✅ Created project: {new_project_name}")
+                        st.session_state.current_project = new_project_name
+                        st.session_state.projects = load_projects()
+                        st.rerun()
+                    else:
+                        st.error(f"Failed to create project: {response.json().get('detail')}")
+                except Exception as e:
+                    st.error(f"Error: {e}")
         
         st.divider()
         
@@ -149,21 +234,42 @@ def upload_page():
                 except Exception as e:
                     st.error(f"Error: {e}")
     
-    # Show existing videos
+    # Show existing videos in current project
     st.divider()
-    st.subheader("📁 Existing Videos")
+    st.subheader(f"📁 Assets in {st.session_state.current_project}")
     
     try:
-        response = httpx.get(f"{API_BASE_URL}/projects")
+        response = httpx.get(f"{API_BASE_URL}/projects/{st.session_state.current_project}/assets")
         if response.status_code == 200:
-            projects = response.json().get("projects", [])
-            if projects:
-                df = pd.DataFrame(projects)
-                st.dataframe(df, use_container_width=True)
-            else:
-                st.info("No videos processed yet")
+            assets = response.json()
+            
+            # Display videos
+            if assets.get("videos"):
+                st.write("**Videos:**")
+                for video in assets["videos"]:
+                    st.text(f"  • {video}")
+            
+            # Display clips count
+            if assets.get("clips"):
+                st.write(f"**Clips:** {len(assets['clips'])} clips extracted")
+            
+            # Display frames count
+            if assets.get("frames"):
+                st.write(f"**Frames:** {len(assets['frames'])} frames analyzed")
+            
+            # Display stills
+            if any(assets.get("stills", {}).values()):
+                st.write("**Still Images:**")
+                for category, files in assets.get("stills", {}).items():
+                    if files:
+                        st.text(f"  {category}: {len(files)} files")
+            
+            if not any([assets.get("videos"), assets.get("clips"), assets.get("frames")]):
+                st.info("No assets in this project yet. Upload videos to get started.")
+        else:
+            st.error(f"Failed to load project assets")
     except Exception as e:
-        st.error(f"Failed to load projects: {e}")
+        st.error(f"Failed to load assets: {e}")
 
 
 def search_page():
@@ -191,7 +297,8 @@ def search_page():
                         "query": query,
                         "n_results": 20,
                         "quality_threshold": quality_threshold,
-                        "search_type": search_type
+                        "search_type": search_type,
+                        "project": st.session_state.current_project
                     },
                     timeout=30.0
                 )
@@ -279,8 +386,20 @@ def chat_page():
                         if result.get("storyboard"):
                             st.session_state.current_storyboard = result["storyboard"]
                             
-                            # Show storyboard details
-                            st.success("✅ Storyboard generated!")
+                            # Auto-save storyboard to project
+                            try:
+                                save_response = httpx.post(
+                                    f"{API_BASE_URL}/projects/{st.session_state.current_project}/storyboards",
+                                    json=result["storyboard"]
+                                )
+                                if save_response.status_code == 200:
+                                    saved_filename = save_response.json()["filename"]
+                                    st.success(f"✅ Storyboard generated and saved: {saved_filename}")
+                                else:
+                                    st.success("✅ Storyboard generated!")
+                                    st.warning("Could not auto-save storyboard")
+                            except:
+                                st.success("✅ Storyboard generated!")
                             
                             col1, col2, col3 = st.columns(3)
                             with col1:
@@ -333,19 +452,57 @@ def render_page():
     """Render videos from storyboards."""
     st.header("🎥 Render Video")
     
-    # Check if we have a storyboard
-    if not st.session_state.current_storyboard:
-        st.info("💡 Generate a storyboard in the Chat section first")
+    # Show saved storyboards
+    col1, col2 = st.columns([3, 1])
+    
+    with col1:
+        st.subheader("📚 Saved Storyboards")
         
-        # Option to upload EDL
-        uploaded_edl = st.file_uploader("Or upload an EDL JSON file", type=['json'])
+        # Load saved storyboards for current project
+        saved_storyboards = load_project_storyboards(st.session_state.current_project)
+        
+        if saved_storyboards:
+            storyboard_options = ["Select a storyboard..."] + [sb["filename"] for sb in saved_storyboards]
+            selected_storyboard = st.selectbox("Choose a saved storyboard:", storyboard_options)
+            
+            if selected_storyboard != "Select a storyboard...":
+                # Load the selected storyboard
+                try:
+                    load_response = httpx.get(
+                        f"{API_BASE_URL}/projects/{st.session_state.current_project}/storyboards/{selected_storyboard}"
+                    )
+                    if load_response.status_code == 200:
+                        st.session_state.current_storyboard = load_response.json()
+                        st.success(f"✅ Loaded: {selected_storyboard}")
+                except Exception as e:
+                    st.error(f"Failed to load storyboard: {e}")
+            
+            # Show storyboard list
+            with st.expander("📄 View all storyboards"):
+                for sb in saved_storyboards:
+                    st.write(f"**{sb['filename']}**")
+                    st.caption(f"Created: {sb['created'][:19]} | Duration: {sb['duration']:.1f}s | Clips: {sb['clips']}")
+                    if sb.get('notes'):
+                        st.caption(f"Notes: {sb['notes'][:100]}...")
+                    st.divider()
+        else:
+            st.info("No saved storyboards in this project yet.")
+    
+    with col2:
+        st.subheader("📂 Upload EDL")
+        uploaded_edl = st.file_uploader("Upload EDL JSON", type=['json'])
         
         if uploaded_edl:
             try:
                 st.session_state.current_storyboard = json.load(uploaded_edl)
-                st.success("✅ Storyboard loaded!")
+                st.success("✅ EDL loaded!")
             except Exception as e:
-                st.error(f"Failed to load EDL: {e}")
+                st.error(f"Failed to load: {e}")
+    
+    # Check if we have a storyboard
+    if not st.session_state.current_storyboard:
+        st.info("💡 Select a saved storyboard or generate one in the Chat section")
+        return
     
     if st.session_state.current_storyboard:
         # Show current storyboard info

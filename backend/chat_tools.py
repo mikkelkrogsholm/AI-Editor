@@ -108,7 +108,7 @@ class StoryboardGenerator:
             }
         ]
     
-    def search_clips(self, query: str, n_results: int = 10, quality_threshold: float = 5.0) -> List[Dict[str, Any]]:
+    def search_clips(self, query: str, project: str = None, n_results: int = 10, quality_threshold: float = 5.0) -> List[Dict[str, Any]]:
         """Search for clips using the vector store."""
         # Generate embedding for the query
         embedding = self.ollama.generate_embedding(query)
@@ -117,7 +117,8 @@ class StoryboardGenerator:
         results = self.vector_store.search_frames(
             query_embedding=embedding,
             n_results=n_results,
-            quality_threshold=quality_threshold
+            quality_threshold=quality_threshold,
+            project=project
         )
         
         # Format results for LLM
@@ -235,7 +236,7 @@ Target duration: {duration_target if duration_target else 'flexible, but keep it
         llm_response = response.json()
         
         # For now, create a simple storyboard based on search
-        search_results = self.search_clips(prompt, n_results=20)
+        search_results = self.search_clips(prompt, project=project_name, n_results=20)
         
         # Select best clips based on quality and relevance
         selected_clips = []
@@ -269,12 +270,12 @@ Target duration: {duration_target if duration_target else 'flexible, but keep it
     def _create_fallback_storyboard(self, prompt: str, project_name: str) -> Storyboard:
         """Create a simple fallback storyboard."""
         # Search for any available clips
-        results = self.vector_store.hybrid_search(prompt, n_results=5)
+        results = self.search_clips(prompt, project=project_name, n_results=5)
         
         clips = []
-        for frame in results.get("frames", [])[:3]:
+        for frame in results[:3]:
             clips.append({
-                "clip_id": frame["id"],
+                "clip_id": frame["clip_id"],
                 "in_point": 0.0,
                 "out_point": 3.0,
                 "transition": "cut"

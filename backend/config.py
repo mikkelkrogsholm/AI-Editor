@@ -192,7 +192,7 @@ class RenderConfig(BaseSettings):
         description="FPS for preview renders"
     )
     preview_watermark: bool = Field(
-        default=True,
+        default=False,
         description="Add watermark to preview renders"
     )
     
