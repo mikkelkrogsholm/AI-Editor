@@ -18,6 +18,8 @@ from .vector import VectorStore
 from .pipeline import VideoPipeline, OllamaClient
 from .chat_tools import StoryboardGenerator, Storyboard
 from .render import VideoRenderer
+from .project import ProjectManager
+from .models import ProjectInfo, ImportAssetRequest, ProjectProcessRequest
 
 # Configure logging
 logging.basicConfig(level=logging.INFO)
@@ -42,7 +44,8 @@ app.add_middleware(
 # Initialize services
 vector_store = VectorStore(persist_directory="./chroma_db")
 ollama_client = OllamaClient()
-video_pipeline = VideoPipeline(vector_store, ollama_client)
+project_manager = ProjectManager()
+video_pipeline = VideoPipeline(vector_store, ollama_client, project_manager)
 storyboard_generator = StoryboardGenerator(vector_store, ollama_client)
 video_renderer = VideoRenderer(vector_store)
 
@@ -68,6 +71,10 @@ class SearchRequest(BaseModel):
     n_results: int = Field(default=20, description="Number of results to return")
     quality_threshold: Optional[float] = Field(default=5.0, description="Minimum quality score")
     search_type: str = Field(default="hybrid", description="Search type: frames, asr, or hybrid")
+    project: Optional[str] = Field(default=None, description="Filter by project")
+    aspect_ratio: Optional[str] = Field(default=None, description="Filter by aspect ratio")
+    orientation: Optional[str] = Field(default=None, description="Filter by orientation")
+    min_resolution: Optional[str] = Field(default=None, description="Minimum resolution")
 
 
 class ChatRequest(BaseModel):
@@ -174,7 +181,11 @@ async def search_clips(request: SearchRequest):
             results = vector_store.search_frames(
                 query_embedding=embedding,
                 n_results=request.n_results,
-                quality_threshold=request.quality_threshold
+                quality_threshold=request.quality_threshold,
+                project=request.project,
+                aspect_ratio=request.aspect_ratio,
+                orientation=request.orientation,
+                min_resolution=request.min_resolution
             )
             return {"frames": results, "asr_segments": []}
         
@@ -397,27 +408,155 @@ async def upload_video(file: UploadFile = File(...), project_name: str = Body(..
 
 @app.get("/projects")
 async def list_projects():
-    """List all projects in the database."""
+    """List all projects."""
     try:
-        # Get unique video paths from vector store
-        all_frames = vector_store.frame_collection.get()
-        
-        projects = {}
-        for i, metadata in enumerate(all_frames.get("metadatas", [])):
-            video_path = metadata.get("video", "")
-            if video_path and video_path not in projects:
-                projects[video_path] = {
-                    "path": video_path,
-                    "name": Path(video_path).stem,
-                    "frame_count": 0
-                }
-            if video_path:
-                projects[video_path]["frame_count"] += 1
-        
-        return {"projects": list(projects.values())}
-    
+        projects = project_manager.list_projects()
+        return projects
     except Exception as e:
         logger.error(f"Failed to list projects: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.post("/projects/create")
+async def create_project(name: str = Body(..., embed=True)):
+    """Create a new project."""
+    try:
+        project_info = project_manager.create_project(name)
+        return {
+            "message": f"Project '{name}' created successfully",
+            "path": str(project_manager.get_project_path(name)),
+            **project_info
+        }
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    except Exception as e:
+        logger.error(f"Failed to create project: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.delete("/projects/{project_name}")
+async def delete_project(project_name: str):
+    """Delete a project and all its files."""
+    try:
+        project_manager.delete_project(project_name)
+        return {"message": f"Project '{project_name}' deleted successfully"}
+    except ValueError as e:
+        raise HTTPException(status_code=404, detail=str(e))
+    except Exception as e:
+        logger.error(f"Failed to delete project: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.post("/projects/{project_name}/import")
+async def import_asset(project_name: str, request: ImportAssetRequest):
+    """Import an asset into a project."""
+    try:
+        result = project_manager.import_asset(
+            project_name,
+            request.file_path,
+            request.asset_type
+        )
+        return result
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    except Exception as e:
+        logger.error(f"Failed to import asset: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.get("/projects/{project_name}/assets")
+async def get_project_assets(project_name: str, asset_type: Optional[str] = None):
+    """Get list of assets in a project."""
+    try:
+        assets = project_manager.get_project_assets(project_name, asset_type)
+        return assets
+    except ValueError as e:
+        raise HTTPException(status_code=404, detail=str(e))
+    except Exception as e:
+        logger.error(f"Failed to get project assets: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+async def process_project_videos(project_name: str, job_id: str):
+    """Background task to process all unprocessed videos in a project."""
+    try:
+        job_status[job_id] = {
+            "status": "processing",
+            "progress": 0,
+            "errors": []
+        }
+        
+        # Get unprocessed videos
+        unprocessed = project_manager.get_unprocessed_videos(project_name)
+        total_videos = len(unprocessed)
+        
+        if total_videos == 0:
+            job_status[job_id]["status"] = "completed"
+            return
+        
+        # Process each video
+        for i, video_path in enumerate(unprocessed):
+            try:
+                # Copy video to project sources if not already there
+                project_path = project_manager.get_project_path(project_name)
+                sources_dir = project_path / "sources"
+                
+                if video_path.parent != sources_dir:
+                    dest_path = sources_dir / video_path.name
+                    shutil.copy2(video_path, dest_path)
+                    video_path = dest_path
+                
+                # Process the video
+                result = await video_pipeline.process_video(str(video_path), project_name)
+                
+                # Update progress
+                job_status[job_id]["progress"] = int((i + 1) / total_videos * 100)
+                
+            except Exception as e:
+                logger.error(f"Failed to process {video_path}: {e}")
+                job_status[job_id]["errors"].append(str(e))
+        
+        job_status[job_id]["status"] = "completed"
+        
+    except Exception as e:
+        logger.error(f"Project processing failed: {e}")
+        job_status[job_id]["status"] = "failed"
+        job_status[job_id]["errors"].append(str(e))
+
+
+@app.post("/projects/{project_name}/process")
+async def process_project(project_name: str, request: ProjectProcessRequest, background_tasks: BackgroundTasks):
+    """Process all unprocessed videos in a project."""
+    try:
+        # Check if project exists
+        project_path = project_manager.get_project_path(project_name)
+        
+        # Get unprocessed videos
+        unprocessed = project_manager.get_unprocessed_videos(project_name)
+        
+        if not unprocessed and not request.force:
+            return {
+                "message": "No unprocessed videos found",
+                "videos_to_process": 0,
+                "job_id": None
+            }
+        
+        # Create job
+        job_id = str(uuid.uuid4())
+        
+        # Start background processing
+        background_tasks.add_task(process_project_videos, project_name, job_id)
+        
+        return {
+            "message": f"Processing {len(unprocessed)} videos",
+            "videos_to_process": len(unprocessed),
+            "job_id": job_id
+        }
+        
+    except ValueError as e:
+        raise HTTPException(status_code=404, detail=str(e))
+    except Exception as e:
+        logger.error(f"Failed to start project processing: {e}")
         raise HTTPException(status_code=500, detail=str(e))
 
 

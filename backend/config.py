@@ -76,6 +76,16 @@ class ProcessingConfig(BaseSettings):
         description="JPEG quality for extracted frames (1-31, lower is better)"
     )
     
+    # Clip extraction
+    clip_duration: float = Field(
+        default=10.0,
+        description="Duration of extracted video clips in seconds"
+    )
+    clip_overlap: float = Field(
+        default=2.0,
+        description="Overlap between consecutive clips in seconds"
+    )
+    
     # Audio processing
     audio_sample_rate: int = Field(
         default=16000,
@@ -129,6 +139,10 @@ class StorageConfig(BaseSettings):
     output_dir: str = Field(
         default="./outputs",
         description="Directory for rendered videos"
+    )
+    projects_dir: str = Field(
+        default="./projects",
+        description="Directory for project-based storage"
     )
     
     # File limits

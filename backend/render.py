@@ -55,7 +55,8 @@ class VideoRenderer:
         return {
             "video_path": metadata["video"],
             "timestamp": self._parse_timestamp(metadata["timestamp"]),
-            "caption": results['documents'][0] if results['documents'] else ""
+            "caption": results['documents'][0] if results['documents'] else "",
+            "clip_path": metadata.get("clip_path")  # Get pre-extracted clip path
         }
     
     def _create_clip(self, segment: ClipSegment) -> VideoFileClip:
@@ -64,18 +65,29 @@ class VideoRenderer:
             # Get clip information
             clip_info = self._get_clip_info(segment.clip_id)
             
-            # Load the video
-            video = VideoFileClip(clip_info["video_path"])
-            
-            # Calculate actual timestamps
-            source_start = clip_info["timestamp"] + segment.in_point
-            source_end = clip_info["timestamp"] + segment.out_point
-            
-            # Extract subclip
-            clip = video.subclip(source_start, min(source_end, video.duration))
-            
-            # Clean up the full video reference
-            video.close()
+            # Use pre-extracted clip if available
+            if clip_info.get("clip_path") and Path(clip_info["clip_path"]).exists():
+                # Load pre-extracted clip
+                video = VideoFileClip(clip_info["clip_path"])
+                
+                # Apply in/out points relative to the clip
+                clip = video.subclip(segment.in_point, min(segment.out_point, video.duration))
+                
+                # Clean up reference
+                video.close()
+            else:
+                # Fallback to extracting from source video
+                video = VideoFileClip(clip_info["video_path"])
+                
+                # Calculate actual timestamps
+                source_start = clip_info["timestamp"] + segment.in_point
+                source_end = clip_info["timestamp"] + segment.out_point
+                
+                # Extract subclip
+                clip = video.subclip(source_start, min(source_end, video.duration))
+                
+                # Clean up the full video reference
+                video.close()
             
             return clip
             

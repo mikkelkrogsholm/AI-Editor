@@ -20,6 +20,8 @@ import logging
 
 from .vector import VectorStore
 from .config import settings, get_model_with_fallback
+from .project import ProjectManager
+from .media_analyzer import media_analyzer
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
@@ -155,9 +157,10 @@ class OllamaClient:
 class VideoPipeline:
     """Main pipeline for processing videos."""
     
-    def __init__(self, vector_store: VectorStore, ollama_client: OllamaClient):
+    def __init__(self, vector_store: VectorStore, ollama_client: OllamaClient, project_manager: ProjectManager = None):
         self.vector_store = vector_store
         self.ollama = ollama_client
+        self.project_manager = project_manager or ProjectManager()
         self.temp_dir = Path(tempfile.mkdtemp(prefix="ai_clip_"))
     
     def __del__(self):
@@ -165,13 +168,14 @@ class VideoPipeline:
         if hasattr(self, 'temp_dir') and self.temp_dir.exists():
             shutil.rmtree(self.temp_dir)
     
-    def extract_frames(self, video_path: str, fps: float = None) -> Generator[Tuple[float, Path], None, None]:
+    def extract_frames(self, video_path: str, output_dir: Path = None, fps: float = None) -> Generator[Tuple[float, Path], None, None]:
         """Extract frames from video at specified FPS."""
         if fps is None:
             fps = settings.processing.frame_extraction_fps
-            
+        
         video_path = Path(video_path)
-        output_pattern = str(self.temp_dir / f"{video_path.stem}_frame_%06d.jpg")
+        output_base = output_dir if output_dir else self.temp_dir
+        output_pattern = str(output_base / f"{video_path.stem}_frame_%06d.jpg")
         
         try:
             # Get video info
@@ -186,13 +190,72 @@ class VideoPipeline:
             ffmpeg.run(stream, quiet=True, overwrite_output=True)
             
             # Yield frames with timestamps
-            frame_files = sorted(self.temp_dir.glob(f"{video_path.stem}_frame_*.jpg"))
+            frame_files = sorted(output_base.glob(f"{video_path.stem}_frame_*.jpg"))
             for i, frame_path in enumerate(frame_files):
                 timestamp = i / fps
                 yield timestamp, frame_path
                 
         except Exception as e:
             logger.error(f"Frame extraction failed: {e}")
+            raise
+    
+    def extract_clips(self, video_path: str, output_dir: Path, duration: float = None, overlap: float = None) -> List[Dict[str, Any]]:
+        """Extract video clips with optional overlap."""
+        if duration is None:
+            duration = settings.processing.clip_duration
+        if overlap is None:
+            overlap = settings.processing.clip_overlap
+        
+        video_path = Path(video_path)
+        clips = []
+        
+        try:
+            # Get video info
+            probe = ffmpeg.probe(str(video_path))
+            video_duration = float(probe['format']['duration'])
+            
+            # Calculate clip timestamps
+            start_time = 0
+            clip_index = 0
+            
+            while start_time < video_duration:
+                end_time = min(start_time + duration, video_duration)
+                
+                # Generate clip filename
+                clip_filename = f"{video_path.stem}_{clip_index:03d}.mp4"
+                clip_path = output_dir / clip_filename
+                
+                # Extract clip
+                stream = ffmpeg.input(str(video_path), ss=start_time, t=end_time-start_time)
+                stream = ffmpeg.output(stream, str(clip_path), 
+                                     vcodec='libx264', 
+                                     acodec='aac',
+                                     preset='fast',
+                                     crf=23)
+                ffmpeg.run(stream, quiet=True, overwrite_output=True)
+                
+                clips.append({
+                    "clip_id": f"{video_path.stem}_clip_{clip_index:03d}",
+                    "clip_path": str(clip_path),
+                    "start_time": start_time,
+                    "end_time": end_time,
+                    "duration": end_time - start_time,
+                    "index": clip_index
+                })
+                
+                # Move to next clip with overlap
+                start_time += duration - overlap
+                clip_index += 1
+                
+                # Avoid tiny clips at the end
+                if video_duration - start_time < overlap:
+                    break
+            
+            logger.info(f"Extracted {len(clips)} clips from {video_path.name}")
+            return clips
+            
+        except Exception as e:
+            logger.error(f"Clip extraction failed: {e}")
             raise
     
     def extract_audio(self, video_path: str) -> Path:
@@ -308,6 +371,7 @@ class VideoPipeline:
             "video": str(video_path),
             "project": project_name,
             "frames_processed": 0,
+            "clips_extracted": 0,
             "asr_segments": 0,
             "errors": []
         }
@@ -315,25 +379,59 @@ class VideoPipeline:
         try:
             logger.info(f"Processing video: {video_path}")
             
+            # Get project paths
+            project_path = self.project_manager.get_project_path(project_name)
+            frames_dir = project_path / "frames"
+            clips_dir = project_path / "clips"
+            audio_dir = project_path / "audio" / "extracted"
+            
+            # Analyze video file
+            logger.info("Analyzing video metadata...")
+            video_info = media_analyzer.get_video_info(str(video_path))
+            
+            # Extract clips
+            logger.info("Extracting video clips...")
+            clips = self.extract_clips(str(video_path), clips_dir)
+            stats["clips_extracted"] = len(clips)
+            
             # Extract frames
             logger.info("Extracting frames...")
-            frames = list(self.extract_frames(str(video_path), fps=1.0))
+            frames = list(self.extract_frames(str(video_path), frames_dir, fps=settings.processing.frame_extraction_fps))
             
             # Extract audio
             logger.info("Extracting audio...")
-            audio_path = self.extract_audio(str(video_path))
+            audio_filename = f"{video_path.stem}_audio.wav"
+            audio_path = audio_dir / audio_filename
             
-            # Process frames
+            # Extract audio to project directory
+            stream = ffmpeg.input(str(video_path))
+            stream = ffmpeg.output(
+                stream,
+                str(audio_path),
+                acodec='pcm_s16le',
+                ar=16000,
+                ac=1
+            )
+            ffmpeg.run(stream, quiet=True, overwrite_output=True)
+            
+            # Process frames with clip information
             logger.info(f"Processing {len(frames)} frames...")
             for timestamp, frame_path in tqdm(frames, desc="Analyzing frames"):
                 try:
+                    # Find corresponding clip
+                    clip_info = None
+                    for clip in clips:
+                        if clip["start_time"] <= timestamp < clip["end_time"]:
+                            clip_info = clip
+                            break
+                    
                     # Analyze frame
                     analysis = self.analyze_frame(frame_path)
                     
                     # Generate embedding
                     embedding = self.ollama.generate_embedding(analysis["caption"])
                     
-                    # Store in vector DB
+                    # Store in vector DB with enhanced metadata
                     frame_id = f"{project_name}_{video_path.stem}_f{int(timestamp*100):06d}"
                     self.vector_store.add_frame(
                         frame_id=frame_id,
@@ -343,7 +441,10 @@ class VideoPipeline:
                         tags=analysis["tags"],
                         mood=analysis["mood"],
                         quality=analysis["quality"],
-                        embedding=embedding
+                        embedding=embedding,
+                        project=project_name,
+                        clip_path=clip_info["clip_path"] if clip_info else None,
+                        media_metadata=video_info
                     )
                     
                     stats["frames_processed"] += 1
@@ -380,7 +481,8 @@ class VideoPipeline:
                         end_time=segment["end"],
                         text=segment["text"],
                         speaker=segment["speaker"],
-                        embedding=embedding
+                        embedding=embedding,
+                        project=project_name
                     )
                     
                     stats["asr_segments"] += 1
@@ -389,7 +491,15 @@ class VideoPipeline:
                     logger.error(f"Failed to process ASR segment {i}: {e}")
                     stats["errors"].append(f"ASR segment {i}: {str(e)}")
             
-            logger.info(f"Processing complete: {stats['frames_processed']} frames, {stats['asr_segments']} ASR segments")
+            # Update project statistics
+            project_stats = {
+                "total_clips": stats["clips_extracted"],
+                "total_frames": stats["frames_processed"],
+                "total_duration": video_info.get("duration", 0)
+            }
+            self.project_manager.update_project_stats(project_name, project_stats)
+            
+            logger.info(f"Processing complete: {stats['clips_extracted']} clips, {stats['frames_processed']} frames, {stats['asr_segments']} ASR segments")
             
         except Exception as e:
             logger.error(f"Pipeline failed: {e}")

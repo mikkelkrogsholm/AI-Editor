@@ -11,6 +11,7 @@ import json
 import httpx
 import time
 from typing import List, Optional
+import shutil
 
 # Initialize Typer app
 app = typer.Typer(
@@ -65,10 +66,11 @@ def wait_for_job(job_id: str, job_type: str = "processing") -> bool:
 @app.command()
 def ingest(
     path: Path = typer.Argument(..., help="Path to video file or directory"),
-    project: str = typer.Option("default", "--project", "-p", help="Project name"),
-    recursive: bool = typer.Option(False, "--recursive", "-r", help="Process directories recursively")
+    project: str = typer.Option(..., "--project", "-p", help="Project name"),
+    recursive: bool = typer.Option(False, "--recursive", "-r", help="Process directories recursively"),
+    copy: bool = typer.Option(True, "--copy/--no-copy", help="Copy files to project (vs. process in place)")
 ):
-    """Ingest videos for processing."""
+    """Ingest videos into a project for processing."""
     console.print(Panel.fit(f"[bold cyan]Ingesting videos for project: {project}[/bold cyan]"))
     
     # Find video files
@@ -77,12 +79,12 @@ def ingest(
     
     if path.is_file():
         if path.suffix.lower() in video_extensions:
-            video_files.append(str(path))
+            video_files.append(path)
     elif path.is_dir():
         pattern = "**/*" if recursive else "*"
         for ext in video_extensions:
-            video_files.extend([str(p) for p in path.glob(f"{pattern}{ext}")])
-            video_files.extend([str(p) for p in path.glob(f"{pattern}{ext.upper()}")])
+            video_files.extend(path.glob(f"{pattern}{ext}"))
+            video_files.extend(path.glob(f"{pattern}{ext.upper()}"))
     
     if not video_files:
         console.print("[red]No video files found![/red]")
@@ -90,34 +92,41 @@ def ingest(
     
     console.print(f"Found [green]{len(video_files)}[/green] video files")
     
-    try:
-        # Send ingest request
-        response = httpx.post(
-            f"{API_BASE_URL}/ingest",
-            json={
-                "project_name": project,
-                "video_paths": video_files
-            }
-        )
-        
-        if response.status_code == 200:
-            result = response.json()
-            console.print(f"[green]Job started:[/green] {result['job_id']}")
-            
-            # Wait for completion
-            if wait_for_job(result['job_id'], "processing"):
-                console.print("[green][/green] Videos processed successfully!")
-            else:
-                console.print("[red][/red] Processing failed!")
-                raise typer.Exit(1)
-        else:
-            console.print(f"[red]API error: {response.text}[/red]")
-            raise typer.Exit(1)
-            
-    except httpx.RequestError as e:
-        console.print(f"[red]Connection error: {e}[/red]")
-        console.print("[yellow]Make sure the API server is running (uvicorn backend.main:app)[/yellow]")
-        raise typer.Exit(1)
+    # Import videos to project
+    imported_count = 0
+    for video_file in video_files:
+        try:
+            if copy:
+                # Import to project
+                response = httpx.post(
+                    f"{API_BASE_URL}/projects/{project}/import",
+                    json={
+                        "file_path": str(video_file),
+                        "asset_type": "video"
+                    }
+                )
+                if response.status_code == 200:
+                    imported_count += 1
+                    console.print(f"  [green]✓[/green] Imported: {video_file.name}")
+                else:
+                    console.print(f"  [red]✗[/red] Failed: {video_file.name}")
+        except Exception as e:
+            console.print(f"  [red]✗[/red] Error importing {video_file.name}: {e}")
+    
+    console.print(f"\n[green]Imported {imported_count}/{len(video_files)} videos[/green]")
+    
+    # Process the project
+    if imported_count > 0:
+        console.print("\n[cyan]Processing imported videos...[/cyan]")
+        try:
+            response = httpx.post(f"{API_BASE_URL}/projects/{project}/process")
+            if response.status_code == 200:
+                result = response.json()
+                if result['job_id']:
+                    wait_for_job(result['job_id'], "processing")
+                    console.print("[green]✓ Processing complete![/green]")
+        except Exception as e:
+            console.print(f"[red]Processing failed: {e}[/red]")
 
 
 @app.command()
@@ -125,20 +134,36 @@ def search(
     query: str = typer.Argument(..., help="Search query"),
     results: int = typer.Option(20, "--results", "-n", help="Number of results"),
     quality: float = typer.Option(5.0, "--quality", "-q", help="Minimum quality threshold"),
-    type: str = typer.Option("hybrid", "--type", "-t", help="Search type: frames, asr, or hybrid")
+    type: str = typer.Option("hybrid", "--type", "-t", help="Search type: frames, asr, or hybrid"),
+    project: Optional[str] = typer.Option(None, "--project", "-p", help="Filter by project"),
+    aspect_ratio: Optional[str] = typer.Option(None, "--aspect-ratio", help="Filter by aspect ratio (e.g., 16:9)"),
+    orientation: Optional[str] = typer.Option(None, "--orientation", help="Filter by orientation (landscape/portrait/square)"),
+    min_resolution: Optional[str] = typer.Option(None, "--min-resolution", help="Minimum resolution (e.g., 1080p, 4K)")
 ):
     """Search for clips in the database."""
     console.print(f"[cyan]Searching for:[/cyan] {query}")
     
     try:
+        search_params = {
+            "query": query,
+            "n_results": results,
+            "quality_threshold": quality,
+            "search_type": type
+        }
+        
+        # Add optional filters
+        if project:
+            search_params["project"] = project
+        if aspect_ratio:
+            search_params["aspect_ratio"] = aspect_ratio
+        if orientation:
+            search_params["orientation"] = orientation
+        if min_resolution:
+            search_params["min_resolution"] = min_resolution
+        
         response = httpx.post(
             f"{API_BASE_URL}/search",
-            json={
-                "query": query,
-                "n_results": results,
-                "quality_threshold": quality,
-                "search_type": type
-            }
+            json=search_params
         )
         
         if response.status_code == 200:
@@ -199,35 +224,31 @@ def storyboard(
     console.print(Panel.fit(f"[bold cyan]Generating storyboard[/bold cyan]\n{prompt}"))
     
     try:
-        # Send chat request
         response = httpx.post(
             f"{API_BASE_URL}/chat",
             json={
-                "message": f"Generate a {duration}-second video: {prompt}",
-                "project_name": project
+                "message": prompt,
+                "conversation_id": f"storyboard_{int(time.time())}",
+                "target_duration": duration
             }
         )
         
         if response.status_code == 200:
             result = response.json()
             
+            # Save storyboard if generated
             if result.get("storyboard"):
                 storyboard = result["storyboard"]
                 
-                # Display storyboard summary
-                console.print(f"\n[green][/green] Storyboard created!")
-                console.print(f"Duration: [yellow]{storyboard['duration']:.1f}s[/yellow]")
-                console.print(f"Clips: [yellow]{len(storyboard['timeline'])}[/yellow]")
-                console.print(f"\nNotes: {storyboard['notes']}")
-                
-                # Save to file if requested
+                # Save to file if output specified
                 if output:
                     with open(output, 'w') as f:
                         json.dump(storyboard, f, indent=2)
-                    console.print(f"\n[green]Saved to:[/green] {output}")
-                else:
-                    # Display timeline
-                    table = Table(title="Timeline")
+                    console.print(f"[green]Storyboard saved to:[/green] {output}")
+                
+                # Display summary
+                if storyboard.get("timeline"):
+                    table = Table(title="Generated Storyboard")
                     table.add_column("Clip", style="cyan")
                     table.add_column("Duration", style="green")
                     table.add_column("Transition", style="yellow")
@@ -322,11 +343,11 @@ def render(
                 if download_response.status_code == 200:
                     with open(output, 'wb') as f:
                         f.write(download_response.content)
-                    console.print(f"[green][/green] Video saved to: {output}")
+                    console.print(f"[green][/green] Video saved to: {output}")
                 else:
                     console.print("[red]Download failed![/red]")
             else:
-                console.print(f"[green][/green] Video rendered successfully!")
+                console.print(f"[green][/green] Video rendered successfully!")
                 console.print(f"Download with: [cyan]ai-clip download {job_id}[/cyan]")
                 
         else:
@@ -358,38 +379,157 @@ def server(
 
 
 @app.command()
-def projects():
-    """List all projects in the database."""
-    try:
-        response = httpx.get(f"{API_BASE_URL}/projects")
+def project(
+    action: str = typer.Argument(..., help="Action: create, list, delete, process, assets"),
+    name: Optional[str] = typer.Argument(None, help="Project name"),
+    asset_type: Optional[str] = typer.Option(None, "--type", "-t", help="Asset type filter"),
+    force: bool = typer.Option(False, "--force", "-f", help="Force reprocessing")
+):
+    """Manage projects and their assets."""
+    
+    if action == "create":
+        if not name:
+            console.print("[red]Project name required for create action[/red]")
+            raise typer.Exit(1)
         
-        if response.status_code == 200:
-            data = response.json()
-            projects = data.get("projects", [])
-            
-            if projects:
+        try:
+            response = httpx.post(f"{API_BASE_URL}/projects/create", json={"name": name})
+            if response.status_code == 200:
+                console.print(f"[green]✓ Created project: {name}[/green]")
+                project_info = response.json()
+                console.print(f"Location: {project_info['path']}")
+            else:
+                console.print(f"[red]Failed to create project: {response.json().get('detail')}[/red]")
+        except Exception as e:
+            console.print(f"[red]Error: {e}[/red]")
+    
+    elif action == "list":
+        try:
+            response = httpx.get(f"{API_BASE_URL}/projects")
+            if response.status_code == 200:
+                projects = response.json()
+                
+                if not projects:
+                    console.print("[yellow]No projects found[/yellow]")
+                    return
+                
                 table = Table(title="Projects")
                 table.add_column("Name", style="cyan")
-                table.add_column("Path", style="white")
-                table.add_column("Frames", style="green")
+                table.add_column("Created", style="green")
+                table.add_column("Videos", justify="right")
+                table.add_column("Clips", justify="right")
+                table.add_column("Frames", justify="right")
                 
                 for project in projects:
+                    stats = project.get("stats", {})
                     table.add_row(
                         project["name"],
-                        project["path"],
-                        str(project["frame_count"])
+                        project["created"][:10],
+                        str(stats.get("total_videos", 0)),
+                        str(stats.get("total_clips", 0)),
+                        str(stats.get("total_frames", 0))
                     )
                 
                 console.print(table)
+        except Exception as e:
+            console.print(f"[red]Error: {e}[/red]")
+    
+    elif action == "delete":
+        if not name:
+            console.print("[red]Project name required for delete action[/red]")
+            raise typer.Exit(1)
+        
+        if not force:
+            confirm = typer.confirm(f"Are you sure you want to delete project '{name}'?")
+            if not confirm:
+                console.print("[yellow]Deletion cancelled[/yellow]")
+                return
+        
+        try:
+            response = httpx.delete(f"{API_BASE_URL}/projects/{name}")
+            if response.status_code == 200:
+                console.print(f"[green]✓ Deleted project: {name}[/green]")
             else:
-                console.print("[yellow]No projects found[/yellow]")
+                console.print(f"[red]Failed to delete project: {response.json().get('detail')}[/red]")
+        except Exception as e:
+            console.print(f"[red]Error: {e}[/red]")
+    
+    elif action == "process":
+        if not name:
+            console.print("[red]Project name required for process action[/red]")
+            raise typer.Exit(1)
+        
+        try:
+            response = httpx.post(f"{API_BASE_URL}/projects/{name}/process", json={"force": force})
+            if response.status_code == 200:
+                result = response.json()
+                console.print(f"[green]Processing project: {name}[/green]")
+                console.print(f"Videos to process: {result['videos_to_process']}")
                 
-        else:
-            console.print(f"[red]Failed to list projects: {response.text}[/red]")
-            
-    except httpx.RequestError as e:
-        console.print(f"[red]Connection error: {e}[/red]")
+                if result['job_id']:
+                    wait_for_job(result['job_id'], "processing")
+                else:
+                    console.print("[yellow]No videos to process[/yellow]")
+        except Exception as e:
+            console.print(f"[red]Error: {e}[/red]")
+    
+    elif action == "assets":
+        if not name:
+            console.print("[red]Project name required for assets action[/red]")
+            raise typer.Exit(1)
+        
+        try:
+            params = {"asset_type": asset_type} if asset_type else {}
+            response = httpx.get(f"{API_BASE_URL}/projects/{name}/assets", params=params)
+            if response.status_code == 200:
+                assets = response.json()
+                
+                for category, files in assets.items():
+                    if files:
+                        console.print(f"\n[bold cyan]{category}:[/bold cyan]")
+                        for file in files:
+                            console.print(f"  • {file}")
+        except Exception as e:
+            console.print(f"[red]Error: {e}[/red]")
+    
+    else:
+        console.print(f"[red]Unknown action: {action}[/red]")
+        console.print("Available actions: create, list, delete, process, assets")
+
+
+@app.command()
+def import_asset(
+    file_path: Path = typer.Argument(..., help="Path to file to import"),
+    project: str = typer.Option(..., "--project", "-p", help="Project name"),
+    asset_type: str = typer.Option(..., "--type", "-t", help="Asset type: video, audio_music, audio_voiceover, still_logo, still_graphic, still_photo")
+):
+    """Import an asset into a project."""
+    if not file_path.exists():
+        console.print(f"[red]File not found: {file_path}[/red]")
         raise typer.Exit(1)
+    
+    valid_types = ["video", "audio_music", "audio_voiceover", "still_logo", "still_graphic", "still_photo"]
+    if asset_type not in valid_types:
+        console.print(f"[red]Invalid asset type. Choose from: {', '.join(valid_types)}[/red]")
+        raise typer.Exit(1)
+    
+    try:
+        response = httpx.post(
+            f"{API_BASE_URL}/projects/{project}/import",
+            json={
+                "file_path": str(file_path),
+                "asset_type": asset_type
+            }
+        )
+        
+        if response.status_code == 200:
+            result = response.json()
+            console.print(f"[green]✓ Imported {asset_type}: {file_path.name}[/green]")
+            console.print(f"Location: {result['path']}")
+        else:
+            console.print(f"[red]Import failed: {response.json().get('detail')}[/red]")
+    except Exception as e:
+        console.print(f"[red]Error: {e}[/red]")
 
 
 @app.command()
@@ -480,16 +620,12 @@ def config(
             console.print(f"[green]Configuration imported from: {import_file}[/green]")
         except Exception as e:
             console.print(f"[red]Failed to import config: {e}[/red]")
-            raise typer.Exit(1)
             
     elif edit:
-        console.print("[yellow]Interactive config editing not yet implemented.[/yellow]")
-        console.print("Please edit config.json or use environment variables.")
-        
+        console.print("[yellow]Interactive configuration editing not yet implemented.[/yellow]")
+        console.print("Please edit config.json directly or use environment variables.")
     else:
-        # Show help if no options
-        console.print("Use --show to view config, --list-models to see available models")
-        console.print("See 'ai-clip config --help' for all options")
+        console.print("[yellow]Use --help to see available options.[/yellow]")
 
 
 def main():

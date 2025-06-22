@@ -15,6 +15,8 @@
   "processing": {
     "frame_extraction_fps": 1.0,
     "frame_quality": 2,
+    "clip_duration": 10.0,
+    "clip_overlap": 2.0,
     "audio_sample_rate": 16000,
     "audio_channels": 1,
     "default_quality_threshold": 5.0,
@@ -26,6 +28,7 @@
     "temp_dir": null,
     "upload_dir": "./uploads",
     "output_dir": "./outputs",
+    "projects_dir": "./projects",
     "max_upload_size": 5368709120
   },
   "ollama": {

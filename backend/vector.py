@@ -40,7 +40,10 @@ class VectorStore:
         tags: List[str],
         mood: str,
         quality: float,
-        embedding: List[float]
+        embedding: List[float],
+        project: str = None,
+        clip_path: str = None,
+        media_metadata: Dict[str, Any] = None
     ) -> None:
         """Add a frame with metadata to the vector store."""
         metadata = {
@@ -51,6 +54,26 @@ class VectorStore:
             "mood": mood,
             "quality": quality
         }
+        
+        # Add project info
+        if project:
+            metadata["project"] = project
+        
+        # Add clip path if available
+        if clip_path:
+            metadata["clip_path"] = clip_path
+        
+        # Add technical metadata
+        if media_metadata:
+            # Store technical metadata as JSON string
+            metadata["media_metadata"] = json.dumps(media_metadata)
+            # Also store key fields directly for filtering
+            metadata["width"] = media_metadata.get("width", 0)
+            metadata["height"] = media_metadata.get("height", 0)
+            metadata["aspect_ratio"] = media_metadata.get("aspect_ratio", "")
+            metadata["orientation"] = media_metadata.get("orientation", "")
+            metadata["resolution_name"] = media_metadata.get("resolution_name", "")
+            metadata["fps"] = media_metadata.get("fps", 0.0)
         
         self.frame_collection.add(
             ids=[frame_id],
@@ -67,7 +90,8 @@ class VectorStore:
         end_time: float,
         text: str,
         speaker: str,
-        embedding: List[float]
+        embedding: List[float],
+        project: str = None
     ) -> None:
         """Add an ASR segment to the vector store."""
         metadata = {
@@ -76,6 +100,10 @@ class VectorStore:
             "end": end_time,
             "speaker": speaker
         }
+        
+        # Add project info
+        if project:
+            metadata["project"] = project
         
         self.asr_collection.add(
             ids=[segment_id],
@@ -89,12 +117,24 @@ class VectorStore:
         query_embedding: List[float],
         n_results: int = 10,
         quality_threshold: Optional[float] = None,
-        tags_filter: Optional[List[str]] = None
+        tags_filter: Optional[List[str]] = None,
+        project: Optional[str] = None,
+        aspect_ratio: Optional[str] = None,
+        orientation: Optional[str] = None,
+        min_resolution: Optional[str] = None
     ) -> List[Dict[str, Any]]:
         """Search for similar frames based on embedding similarity."""
         where_clause = {}
         if quality_threshold:
             where_clause["quality"] = {"$gte": quality_threshold}
+        if project:
+            where_clause["project"] = {"$eq": project}
+        if aspect_ratio:
+            where_clause["aspect_ratio"] = {"$eq": aspect_ratio}
+        if orientation:
+            where_clause["orientation"] = {"$eq": orientation}
+        if min_resolution:
+            where_clause["resolution_name"] = {"$eq": min_resolution}
         
         results = self.frame_collection.query(
             query_embeddings=[query_embedding],
@@ -114,6 +154,10 @@ class VectorStore:
             
             # Parse tags from metadata
             result["metadata"]["tags"] = json.loads(result["metadata"]["tags"])
+            
+            # Parse media metadata if present
+            if "media_metadata" in result["metadata"]:
+                result["metadata"]["media_metadata"] = json.loads(result["metadata"]["media_metadata"])
             
             # Filter by tags if specified
             if tags_filter:
