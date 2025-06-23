@@ -2,6 +2,26 @@
 
 This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
 
+## Important: Use Context7 for Documentation
+
+**ALWAYS use the Context7 MCP tool to search for up-to-date documentation when:**
+- Building new features or integrations
+- Debugging issues with dependencies
+- Looking for best practices or API usage
+- Troubleshooting errors
+
+**How to use Context7:**
+1. First use `mcp__context7__resolve-library-id` to find the library
+2. Then use `mcp__context7__get-library-docs` with relevant topics
+3. This ensures you get the latest, accurate documentation instead of relying on training data
+
+**Example:**
+```
+# For MoviePy issues:
+mcp__context7__resolve-library-id("moviepy")
+mcp__context7__get-library-docs("/zulko/moviepy", "ImageMagick error environment")
+```
+
 ## Project Overview
 
 AI-Klipperen is an AI-powered video clipper and editor that processes videos locally using Ollama models to understand content, enable semantic search, and automatically generate edited videos through a chat interface.
@@ -21,9 +41,10 @@ The system consists of four main components that interact through a REST API:
    - Supports hybrid search (text + embedding similarity)
    - Maintains video-to-segment relationships
 
-3. **Storyboard Generation** (`backend/chat_tools.py`)
-   - Uses LLM (Mistral) to interpret user prompts
-   - Searches relevant clips based on semantic understanding
+3. **Storyboard Generation** (`backend/chat_tools_v2.py`)
+   - Uses enhanced LLM (qwen2.5:14b) with function calling
+   - Validates all clip IDs exist before creating timeline
+   - Intelligent fallback ensures valid clips are always found
    - Generates EDL JSON with timeline, transitions, and metadata
 
 4. **Video Rendering** (`backend/render.py`)
@@ -67,7 +88,8 @@ pytest tests/test_basic.py::test_vector_store_init -v  # Single test
 ### Ollama Model Requirements
 - `minicpm-v:8b-2.6-q4_0` - Vision captioning (8B parameter vision model)
 - `snowflake-arctic-embed2:latest` - Text embeddings (1024-dim)
-- `deepseek-r1:32b` - Storyboard generation (32B reasoning model)
+- `qwen2.5:14b` - Chat and storyboard generation with function calling (14B model)
+- `deepseek-r1:32b` - Alternative for complex reasoning tasks (32B model)
 
 ### Data Flow
 1. Video → FFmpeg → Frames + Audio
@@ -136,41 +158,91 @@ Long-running operations (ingest, render) use FastAPI BackgroundTasks with job st
 - ✅ Chat-based storyboard generation working correctly
 - ✅ All Danish UI improvements implemented
 
-### Current Blocker - MoviePy/ImageMagick Rendering:
-**Error**: `[Errno 2] No such file or directory: 'unset'`
-- ImageMagick is installed (`/opt/homebrew/bin/magick`)
-- Individual clip tests work fine in isolation
-- Full rendering pipeline consistently fails on the last clip (20250620_185203_001.mp4)
-- Tried multiple fixes without success:
-  - Setting IMAGEMAGICK_BINARY environment variable
-  - Configuring MoviePy settings before import
-  - Disabling watermarks (preview_watermark=False)
-  - Removing all transitions
-  - Using concatenate_videoclips with 'chain' method instead of 'compose'
-  - Skipping resize operations entirely
-  
-**Latest Findings**:
-- The error occurs specifically when MoviePy processes the last clip in the storyboard
-- Using 'chain' method works in isolated tests but still fails in full pipeline
-- The error message suggests MoviePy is trying to execute literal string "unset"
-- This might be related to async/background task environment variables
+### ✅ MoviePy/ImageMagick Issue RESOLVED (2025-06-23):
+**Solution**: Environment variables were not preserved in FastAPI background tasks.
 
-### TODO When Returning:
-1. **Fix Rendering Issue** (Priority #1):
-   ```bash
-   # Option 1: Use pure FFmpeg instead of MoviePy
-   # Option 2: Debug the environment variable issue
-   # Option 3: Try different MoviePy version
-   pip install moviepy==1.0.3  # Try older stable version
-   ```
+**Fix Applied**:
+```python
+# In background tasks (main.py):
+os.environ["IMAGEMAGICK_BINARY"] = "/opt/homebrew/bin/magick"
+os.environ["FFMPEG_BINARY"] = "/opt/miniconda3/bin/ffmpeg"
+```
 
-2. **Complete Testing**:
-   - Once rendering works, test full pipeline end-to-end
-   - Verify preview and final render modes
-   - Test with different video formats
+**Results**:
+- ✅ Both synchronous and asynchronous rendering now work
+- ✅ MoviePy can find ImageMagick in all contexts
+- ✅ Preview and final render modes both functional
+- ✅ Fixed final render to use concatenate_videoclips for full duration
+- See tests/debug/DEBUG_MOVIEPY_ISSUE.md for full troubleshooting history
 
-3. **Future Features**:
-   - Audio/ASR processing (when Ollama supports it)
-   - Advanced editing (color correction, effects)
-   - Timeline editor UI
-   - Multiple export formats
+### ✅ Enhanced Storyboard Generation Implemented (2025-06-23):
+**Improvements**:
+- Implemented `EnhancedStoryboardGenerator` in chat_tools_v2.py
+- Uses qwen2.5:14b model with function calling support
+- Features intelligent clip selection based on mood/pace analysis
+- Real frame IDs instead of generic placeholders
+- Automatic fallback to intelligent generation if LLM fails
+
+**Configuration**:
+```python
+# Updated config.py default:
+chat_model: str = "qwen2.5:14b"
+```
+
+### Testing Complete:
+- ✅ Preview rendering: 39s video with 10 clips
+- ✅ Final rendering: Full duration videos (not truncated)
+- ✅ Enhanced storyboard generation with real clip IDs
+- ✅ API endpoints working correctly
+
+### ✅ Chat Functionality Enhanced (2025-06-23):
+**Improvements**:
+- Chat now uses AI for all responses (not just storyboard generation)
+- ✅ **Project Content Awareness** - AI knows about available videos and their content
+- ✅ **Fixed Black Video Rendering** - All generated clips are validated before use
+- ✅ **English-only Communication** - Removed Danish keywords for consistency
+- Natural conversation flow with helpful guidance
+- Maintains context about current project
+
+**UI Chat Features**:
+- Full conversational AI assistant with content knowledge
+- Automatic storyboard generation when requested
+- Saves storyboards automatically to project
+- Shows timeline details and clip counts
+- Validates all clips exist before rendering
+
+### ✅ Black Video Rendering Fixed (2025-06-23):
+**Root Cause**: AI was generating invalid clip IDs when searches returned no results
+
+**Solution Implemented**:
+1. **Clip Validation** in `chat_tools_v2.py`:
+   - Validates all clip IDs exist in database
+   - Falls back to intelligent selection if invalid IDs detected
+   - Always finds valid clips even if searches fail
+
+2. **Improved Search Fallbacks**:
+   - Tries common keywords if initial search fails
+   - Gets random clips from project as last resort
+   - Ensures timeline always has valid clips
+
+3. **Pre-render Validation** in `render.py`:
+   - `validate_storyboard()` method checks all clips
+   - New `/validate_storyboard` API endpoint
+   - Clear error messages for missing clips
+
+4. **Project Context** in chat:
+   - `get_project_content_context()` provides content analysis
+   - AI knows about moods, tags, and available footage
+   - Better clip recommendations based on actual content
+
+### API Updates:
+- `POST /chat` - Enhanced with project content awareness
+- `POST /validate_storyboard` - New endpoint to check clips before rendering
+
+### Future Features:
+- Audio/ASR processing (when Ollama supports it)
+- Advanced editing (color correction, effects)
+- Timeline editor UI
+- Multiple export formats
+- Conversation history persistence
+- Manual clip selection in UI
