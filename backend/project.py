@@ -333,3 +333,135 @@ class ProjectManager:
         
         with open(storyboard_path, 'r') as f:
             return json.load(f)
+    
+    def get_project_content_context(self, project_name: str, vector_store) -> Dict[str, Any]:
+        """Get comprehensive content information for AI context."""
+        project_path = self.get_project_path(project_name)
+        
+        # Get basic project info
+        metadata_path = project_path / "metadata.json"
+        with open(metadata_path, 'r') as f:
+            metadata = json.load(f)
+        
+        # Get all assets
+        assets = self.get_project_assets(project_name)
+        
+        # Get all frames from vector store
+        frames = vector_store.get_frames_by_project(project_name)
+        
+        # Analyze content by categories
+        content_analysis = {
+            "total_videos": len(assets.get("videos", [])),
+            "total_clips": len(assets.get("clips", [])),
+            "total_frames_analyzed": len(frames),
+            "moods": {},
+            "tags": {},
+            "quality_distribution": {"high": 0, "medium": 0, "low": 0},
+            "technical_specs": {
+                "resolutions": set(),
+                "aspect_ratios": set(),
+                "fps_values": set()
+            },
+            "content_by_video": {}
+        }
+        
+        # Analyze each frame
+        for frame in frames:
+            meta = frame["metadata"]
+            
+            # Count moods
+            mood = meta.get("mood", "unknown")
+            content_analysis["moods"][mood] = content_analysis["moods"].get(mood, 0) + 1
+            
+            # Count tags
+            tags = meta.get("tags", [])
+            if isinstance(tags, str):
+                tags = json.loads(tags)
+            for tag in tags:
+                content_analysis["tags"][tag] = content_analysis["tags"].get(tag, 0) + 1
+            
+            # Quality distribution
+            quality = meta.get("quality", 5)
+            if quality >= 7:
+                content_analysis["quality_distribution"]["high"] += 1
+            elif quality >= 4:
+                content_analysis["quality_distribution"]["medium"] += 1
+            else:
+                content_analysis["quality_distribution"]["low"] += 1
+            
+            # Technical specs
+            if meta.get("resolution_name"):
+                content_analysis["technical_specs"]["resolutions"].add(meta["resolution_name"])
+            if meta.get("aspect_ratio"):
+                content_analysis["technical_specs"]["aspect_ratios"].add(meta["aspect_ratio"])
+            if meta.get("fps"):
+                content_analysis["technical_specs"]["fps_values"].add(int(meta["fps"]))
+            
+            # Group by video
+            video_name = Path(meta.get("video", "")).name
+            if video_name not in content_analysis["content_by_video"]:
+                content_analysis["content_by_video"][video_name] = {
+                    "frame_count": 0,
+                    "clips": set(),
+                    "moods": [],
+                    "key_moments": []
+                }
+            
+            video_content = content_analysis["content_by_video"][video_name]
+            video_content["frame_count"] += 1
+            video_content["moods"].append(mood)
+            
+            # Add key moments (high quality frames with good captions)
+            if quality >= 7 and len(frame["caption"]) > 50:
+                video_content["key_moments"].append({
+                    "timestamp": meta.get("timestamp", ""),
+                    "description": frame["caption"][:100] + "...",
+                    "mood": mood,
+                    "tags": tags[:3]  # First 3 tags
+                })
+        
+        # Convert sets to lists for JSON serialization
+        content_analysis["technical_specs"]["resolutions"] = list(content_analysis["technical_specs"]["resolutions"])
+        content_analysis["technical_specs"]["aspect_ratios"] = list(content_analysis["technical_specs"]["aspect_ratios"])
+        content_analysis["technical_specs"]["fps_values"] = sorted(list(content_analysis["technical_specs"]["fps_values"]))
+        
+        # Clean up content_by_video
+        for video_name, video_data in content_analysis["content_by_video"].items():
+            video_data["clips"] = list(video_data["clips"])
+            video_data["dominant_mood"] = max(set(video_data["moods"]), key=video_data["moods"].count) if video_data["moods"] else "unknown"
+            del video_data["moods"]  # Remove raw mood list
+            video_data["key_moments"] = video_data["key_moments"][:5]  # Keep top 5 moments
+        
+        return {
+            "project_name": project_name,
+            "created": metadata["created"],
+            "assets": assets,
+            "content_analysis": content_analysis,
+            "summary": self._generate_content_summary(content_analysis)
+        }
+    
+    def _generate_content_summary(self, analysis: Dict[str, Any]) -> str:
+        """Generate a human-readable summary of project content."""
+        summary_parts = []
+        
+        # Basic stats
+        summary_parts.append(f"{analysis['total_videos']} videos with {analysis['total_frames_analyzed']} analyzed frames")
+        
+        # Top moods
+        if analysis["moods"]:
+            top_moods = sorted(analysis["moods"].items(), key=lambda x: x[1], reverse=True)[:3]
+            mood_str = ", ".join([f"{mood} ({count})" for mood, count in top_moods])
+            summary_parts.append(f"Main moods: {mood_str}")
+        
+        # Top tags
+        if analysis["tags"]:
+            top_tags = sorted(analysis["tags"].items(), key=lambda x: x[1], reverse=True)[:5]
+            tag_str = ", ".join([f"{tag} ({count})" for tag, count in top_tags])
+            summary_parts.append(f"Common elements: {tag_str}")
+        
+        # Technical
+        if analysis["technical_specs"]["resolutions"]:
+            res_str = ", ".join(analysis["technical_specs"]["resolutions"])
+            summary_parts.append(f"Resolutions: {res_str}")
+        
+        return " | ".join(summary_parts)

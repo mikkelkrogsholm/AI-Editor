@@ -308,6 +308,33 @@ class VectorStore:
             "asr_segments": asr_segments
         }
     
+    def get_frames_by_project(self, project: str, limit: int = 1000) -> List[Dict[str, Any]]:
+        """Get all frames for a specific project."""
+        # Get all frames for the project without using embeddings
+        results = self.frame_collection.get(
+            where={"project": {"$eq": project}},
+            limit=limit
+        )
+        
+        # Process results
+        frames = []
+        if results['ids']:
+            for i in range(len(results['ids'])):
+                frame = {
+                    "id": results['ids'][i],
+                    "caption": results['documents'][i] if results['documents'] else "",
+                    "metadata": results['metadatas'][i] if results['metadatas'] else {}
+                }
+                # Parse tags if present
+                if frame["metadata"].get("tags"):
+                    try:
+                        frame["metadata"]["tags"] = json.loads(frame["metadata"]["tags"])
+                    except:
+                        frame["metadata"]["tags"] = []
+                frames.append(frame)
+        
+        return frames
+    
     def delete_video_data(self, video_path: str) -> None:
         """Delete all data associated with a video."""
         # Get all IDs for the video

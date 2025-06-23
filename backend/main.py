@@ -13,13 +13,16 @@ import shutil
 import uuid
 import json
 import logging
+import os
 
 from .vector import VectorStore
 from .pipeline import VideoPipeline, OllamaClient
 from .chat_tools import StoryboardGenerator, Storyboard
+from .chat_tools_v2 import EnhancedStoryboardGenerator
 from .render import VideoRenderer
 from .project import ProjectManager
 from .models import ProjectInfo, ImportAssetRequest, ProjectProcessRequest
+from .config import settings
 
 # Configure logging
 logging.basicConfig(level=logging.INFO)
@@ -47,6 +50,19 @@ ollama_client = OllamaClient()
 project_manager = ProjectManager()
 video_pipeline = VideoPipeline(vector_store, ollama_client, project_manager)
 storyboard_generator = StoryboardGenerator(vector_store, ollama_client)
+# Use enhanced generator if qwen2.5 is available
+try:
+    available_models = ollama_client.get_available_models()
+    logger.info(f"Available models: {available_models}")
+    
+    if "qwen2.5:14b" in available_models:
+        storyboard_generator = EnhancedStoryboardGenerator(vector_store, ollama_client)
+        logger.info("Using EnhancedStoryboardGenerator with qwen2.5:14b")
+    else:
+        logger.info("Using standard StoryboardGenerator - qwen2.5:14b not found")
+except Exception as e:
+    logger.warning(f"Error checking for qwen2.5:14b: {e}")
+    logger.info("Using standard StoryboardGenerator")
 video_renderer = VideoRenderer(vector_store)
 
 # Store for background job status
@@ -215,6 +231,52 @@ async def search_clips(request: SearchRequest):
         raise HTTPException(status_code=500, detail=str(e))
 
 
+def format_project_content_for_ai(context: Dict[str, Any]) -> str:
+    """Format project content information for AI consumption."""
+    parts = []
+    
+    # Basic stats
+    analysis = context.get("content_analysis", {})
+    parts.append(f"CONTENT OVERVIEW:")
+    parts.append(f"- {analysis.get('total_videos', 0)} videos")
+    parts.append(f"- {analysis.get('total_clips', 0)} extracted clips")
+    parts.append(f"- {analysis.get('total_frames_analyzed', 0)} analyzed frames")
+    
+    # Mood distribution
+    if analysis.get("moods"):
+        parts.append(f"\nMOODS CAPTURED:")
+        for mood, count in sorted(analysis["moods"].items(), key=lambda x: x[1], reverse=True)[:5]:
+            parts.append(f"- {mood}: {count} frames")
+    
+    # Common elements
+    if analysis.get("tags"):
+        parts.append(f"\nCOMMON ELEMENTS:")
+        for tag, count in sorted(analysis["tags"].items(), key=lambda x: x[1], reverse=True)[:10]:
+            parts.append(f"- {tag}: {count} occurrences")
+    
+    # Technical info
+    tech = analysis.get("technical_specs", {})
+    if tech.get("resolutions"):
+        parts.append(f"\nTECHNICAL SPECS:")
+        parts.append(f"- Resolutions: {', '.join(tech['resolutions'])}")
+        parts.append(f"- Aspect ratios: {', '.join(tech['aspect_ratios'])}")
+        parts.append(f"- Frame rates: {', '.join(map(str, tech['fps_values']))} fps")
+    
+    # Video-specific highlights
+    if analysis.get("content_by_video"):
+        parts.append(f"\nVIDEO CONTENT:")
+        for video_name, video_data in list(analysis["content_by_video"].items())[:5]:
+            parts.append(f"\n{video_name}:")
+            parts.append(f"- {video_data['frame_count']} frames analyzed")
+            parts.append(f"- Dominant mood: {video_data.get('dominant_mood', 'unknown')}")
+            if video_data.get("key_moments"):
+                parts.append(f"- Key moments:")
+                for moment in video_data["key_moments"][:3]:
+                    parts.append(f"  • {moment['timestamp']}: {moment['description']}")
+    
+    return "\n".join(parts)
+
+
 @app.post("/chat", response_model=ChatResponse)
 async def chat_interaction(request: ChatRequest):
     """Handle chat interaction for storyboard generation."""
@@ -223,7 +285,7 @@ async def chat_interaction(request: ChatRequest):
         conversation_id = request.conversation_id or str(uuid.uuid4())
         
         # Check if the message is requesting storyboard generation
-        keywords = ["generate", "create", "make", "storyboard", "edit", "compile"]
+        keywords = ["generate", "create", "make", "storyboard", "edit", "compile", "build", "produce", "render"]
         is_generation_request = any(keyword in request.message.lower() for keyword in keywords)
         
         if is_generation_request:
@@ -241,15 +303,89 @@ async def chat_interaction(request: ChatRequest):
             )
         
         else:
-            # Regular chat response
+            # Regular chat response - use AI to answer
+            try:
+                # Get project context
+                project_context = project_manager.get_project_content_context(
+                    request.project_name, 
+                    vector_store
+                )
+                
+                # Format content information for the AI
+                content_info = format_project_content_for_ai(project_context)
+                
+                # Use the chat model to generate a response
+                messages = [
+                    {
+                        "role": "system",
+                        "content": f"""You are AI-Klipperen, an AI video editing assistant with deep knowledge of the user's video content.
+
+PROJECT: {request.project_name}
+
+{content_info}
+
+Your capabilities:
+- Answer questions about the available video content
+- Suggest creative ideas based on the actual footage
+- Help users understand what types of shots they have
+- Recommend specific clips for different moods or themes
+- Guide users to create storyboards using words like 'create', 'generate', 'make'
+
+Be helpful, creative, and specific. Reference actual content when making suggestions.
+Keep responses concise but informative."""
+                    },
+                    {
+                        "role": "user",
+                        "content": request.message
+                    }
+                ]
+                
+                # Get AI response
+                response = ollama_client.client.post(
+                    f"{ollama_client.base_url}/api/chat",
+                    json={
+                        "model": settings.models.chat_model,
+                        "messages": messages,
+                        "stream": False
+                    }
+                )
+                
+                if response.status_code == 200:
+                    ai_response = response.json()
+                    response_text = ai_response.get("message", {}).get("content", "I can help you create storyboards for your videos.")
+                else:
+                    logger.warning(f"Ollama chat API returned status {response.status_code}: {response.text}")
+                    response_text = "I can help you create storyboards for your videos. Try asking me to 'generate a 30-second energetic montage' or 'create a storyboard focusing on crowd shots'."
+                    
+            except Exception as e:
+                logger.warning(f"Failed to get AI response: {e}", exc_info=True)
+                response_text = "I can help you create storyboards for your videos. Try asking me to 'generate a 30-second energetic montage' or 'create a storyboard focusing on crowd shots'."
+            
             return ChatResponse(
-                response="I can help you create storyboards for your videos. Try asking me to 'generate a 30-second energetic montage' or 'create a storyboard focusing on crowd shots'.",
+                response=response_text,
                 storyboard=None,
                 conversation_id=conversation_id
             )
     
     except Exception as e:
         logger.error(f"Chat interaction failed: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.post("/validate_storyboard")
+async def validate_storyboard(request: Dict[str, Any] = Body(...)):
+    """Validate a storyboard before rendering."""
+    try:
+        # Create storyboard object
+        storyboard = Storyboard(**request)
+        
+        # Validate using renderer
+        validation_result = video_renderer.validate_storyboard(storyboard)
+        
+        return validation_result
+    
+    except Exception as e:
+        logger.error(f"Validation failed: {e}")
         raise HTTPException(status_code=500, detail=str(e))
 
 
@@ -293,10 +429,21 @@ async def create_preview(request: RenderRequest, background_tasks: BackgroundTas
 async def render_preview_background(job_id: str, storyboard: Storyboard, output_path: str):
     """Background task for rendering preview."""
     try:
+        # Debug environment variables
+        logger.info(f"=== Background Task Environment Debug ===")
+        logger.info(f"PATH: {os.environ.get('PATH', 'NOT SET')}")
+        logger.info(f"IMAGEMAGICK_BINARY: {os.environ.get('IMAGEMAGICK_BINARY', 'NOT SET')}")
+        logger.info(f"FFMPEG_BINARY: {os.environ.get('FFMPEG_BINARY', 'NOT SET')}")
+        
+        # Set environment variables explicitly
+        os.environ["IMAGEMAGICK_BINARY"] = "/opt/homebrew/bin/magick"
+        os.environ["FFMPEG_BINARY"] = "/opt/miniconda3/bin/ffmpeg"
+        logger.info(f"Set IMAGEMAGICK_BINARY to: {os.environ['IMAGEMAGICK_BINARY']}")
+        
         video_renderer.render_preview(storyboard, output_path)
         job_status[job_id]["status"] = "completed"
     except Exception as e:
-        logger.error(f"Preview rendering failed: {e}")
+        logger.error(f"Preview rendering failed: {e}", exc_info=True)
         job_status[job_id]["status"] = "failed"
         job_status[job_id]["error"] = str(e)
 
@@ -341,12 +488,46 @@ async def render_final(request: RenderRequest, background_tasks: BackgroundTasks
 async def render_final_background(job_id: str, storyboard: Storyboard, output_path: str):
     """Background task for rendering final video."""
     try:
+        # Set environment variables explicitly (same as preview)
+        os.environ["IMAGEMAGICK_BINARY"] = "/opt/homebrew/bin/magick"
+        os.environ["FFMPEG_BINARY"] = "/opt/miniconda3/bin/ffmpeg"
+        
         video_renderer.render_final(storyboard, output_path)
         job_status[job_id]["status"] = "completed"
     except Exception as e:
-        logger.error(f"Final rendering failed: {e}")
+        logger.error(f"Final rendering failed: {e}", exc_info=True)
         job_status[job_id]["status"] = "failed"
         job_status[job_id]["error"] = str(e)
+
+
+@app.post("/render_sync")
+def render_sync(request: RenderRequest):
+    """Test synchronous rendering without background tasks."""
+    try:
+        # Set environment variables
+        os.environ["IMAGEMAGICK_BINARY"] = "/opt/homebrew/bin/magick"
+        os.environ["FFMPEG_BINARY"] = "/opt/miniconda3/bin/ffmpeg"
+        
+        storyboard = Storyboard(**request.storyboard)
+        output_filename = request.output_filename or f"sync_test_{uuid.uuid4()}.mp4"
+        output_path = Path("./outputs/sync_test") / output_filename
+        output_path.parent.mkdir(parents=True, exist_ok=True)
+        
+        logger.info(f"Starting synchronous render to {output_path}")
+        video_renderer.render_preview(storyboard, str(output_path))
+        
+        return {
+            "status": "success",
+            "path": str(output_path),
+            "message": "Synchronous render completed"
+        }
+    except Exception as e:
+        logger.error(f"Sync render failed: {e}", exc_info=True)
+        return {
+            "status": "failed",
+            "error": str(e),
+            "message": "Synchronous render failed"
+        }
 
 
 @app.get("/render/status/{job_id}")

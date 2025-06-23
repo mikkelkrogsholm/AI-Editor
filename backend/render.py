@@ -7,6 +7,7 @@ from pathlib import Path
 # Configure ImageMagick path for MoviePy BEFORE importing moviepy
 import os
 os.environ["IMAGEMAGICK_BINARY"] = "/opt/homebrew/bin/magick"
+os.environ["FFMPEG_BINARY"] = "/opt/miniconda3/bin/ffmpeg"
 
 # Now import moviepy
 from moviepy.editor import *
@@ -37,6 +38,42 @@ class VideoRenderer:
         """Cleanup temporary directory."""
         if hasattr(self, 'temp_dir') and self.temp_dir.exists():
             shutil.rmtree(self.temp_dir)
+    
+    def validate_storyboard(self, storyboard: Storyboard) -> Dict[str, Any]:
+        """Validate that all clips in storyboard exist."""
+        validation_result = {
+            "valid": True,
+            "total_clips": len(storyboard.timeline),
+            "valid_clips": 0,
+            "missing_clips": [],
+            "warnings": []
+        }
+        
+        for segment in storyboard.timeline:
+            try:
+                # Check if clip exists
+                results = self.vector_store.frame_collection.get(
+                    ids=[segment.clip_id],
+                    include=["metadatas"]
+                )
+                
+                if results['ids'] and results['ids'][0]:
+                    validation_result["valid_clips"] += 1
+                else:
+                    validation_result["valid"] = False
+                    validation_result["missing_clips"].append(segment.clip_id)
+                    logger.warning(f"Clip not found: {segment.clip_id}")
+            except Exception as e:
+                validation_result["valid"] = False
+                validation_result["missing_clips"].append(segment.clip_id)
+                validation_result["warnings"].append(f"Error checking {segment.clip_id}: {str(e)}")
+        
+        if validation_result["missing_clips"]:
+            validation_result["warnings"].append(
+                f"Missing {len(validation_result['missing_clips'])} clips out of {validation_result['total_clips']}"
+            )
+        
+        return validation_result
     
     def _parse_timestamp(self, timestamp: str) -> float:
         """Convert timestamp string (MM:SS.MS) to seconds."""
@@ -184,6 +221,11 @@ class VideoRenderer:
         """Render a low-resolution preview of the storyboard."""
         # Ensure ImageMagick is configured
         os.environ["IMAGEMAGICK_BINARY"] = "/opt/homebrew/bin/magick"
+        os.environ["FFMPEG_BINARY"] = "/opt/miniconda3/bin/ffmpeg"
+        
+        # Log current config
+        logger.info(f"MoviePy config - IMAGEMAGICK: {os.environ.get('IMAGEMAGICK_BINARY')}")
+        logger.info(f"MoviePy config - FFMPEG: {os.environ.get('FFMPEG_BINARY')}")
         
         # Use config defaults if not specified
         if resolution is None:
@@ -195,6 +237,13 @@ class VideoRenderer:
             
         try:
             logger.info(f"Rendering preview for {storyboard.project_name}")
+            
+            # Validate storyboard first
+            validation = self.validate_storyboard(storyboard)
+            if not validation["valid"]:
+                logger.error(f"Invalid storyboard: {validation['warnings']}")
+                if validation["valid_clips"] == 0:
+                    raise ValueError("No valid clips found in storyboard. All clips are missing.")
             
             # Create clips from timeline
             clips = []
@@ -324,9 +373,15 @@ class VideoRenderer:
                 # Create the clip
                 clip = self._create_clip(segment)
                 
-                # Ensure proper resolution
-                if clip.size != resolution:
-                    clip = clip.resize(resolution)
+                if clip is None:
+                    logger.error(f"Failed to create clip for segment {i}: {segment.clip_id}")
+                    continue
+                
+                logger.info(f"Processing clip {i+1}/{len(storyboard.timeline)}: duration={clip.duration:.2f}s")
+                
+                # Skip resize for now to avoid issues (like in preview)
+                # if clip.size != resolution:
+                #     clip = clip.resize(resolution)
                 
                 # Apply transition if not the first clip
                 if previous_clip and i > 0:
@@ -353,7 +408,10 @@ class VideoRenderer:
                 logger.warning("No clips to render")
                 final_video = ColorClip(size=resolution, color=(0, 0, 0), duration=1)
             else:
-                final_video = CompositeVideoClip(clips)
+                # Use concatenate_videoclips like in preview (which works)
+                from moviepy.video.compositing.concatenate import concatenate_videoclips
+                logger.info(f"Concatenating {len(clips)} clips for final render")
+                final_video = concatenate_videoclips(clips, method="chain")
             
             # Add voiceover if specified
             audio_clips = []
