@@ -208,14 +208,8 @@ class VideoRenderer:
                     logger.error(f"Failed to create clip for segment {i}: {segment.clip_id}")
                     continue
                 
-                # Resize for preview
-                logger.info(f"Resizing clip to {resolution}")
-                try:
-                    clip = clip.resize(resolution)
-                except Exception as e:
-                    logger.error(f"Failed to resize clip: {e}")
-                    # Try with explicit width/height
-                    clip = clip.resize(width=resolution[0], height=resolution[1])
+                # Skip resize for now to avoid ImageMagick issues
+                logger.info(f"Skipping resize to avoid ImageMagick issues")
                 
                 # Simply add clips without transitions for now
                 clips.append(clip)
@@ -232,7 +226,8 @@ class VideoRenderer:
                 # Use concatenate_videoclips instead of CompositeVideoClip
                 from moviepy.video.compositing.concatenate import concatenate_videoclips
                 logger.info(f"Concatenating {len(clips)} clips")
-                final_video = concatenate_videoclips(clips, method="compose")
+                # Use 'chain' method instead of 'compose' to avoid ImageMagick issues
+                final_video = concatenate_videoclips(clips, method="chain")
             
             # Add watermark if requested
             if watermark:

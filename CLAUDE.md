@@ -140,13 +140,20 @@ Long-running operations (ingest, render) use FastAPI BackgroundTasks with job st
 **Error**: `[Errno 2] No such file or directory: 'unset'`
 - ImageMagick is installed (`/opt/homebrew/bin/magick`)
 - Individual clip tests work fine in isolation
-- Full rendering pipeline fails on the last clip
+- Full rendering pipeline consistently fails on the last clip (20250620_185203_001.mp4)
 - Tried multiple fixes without success:
   - Setting IMAGEMAGICK_BINARY environment variable
   - Configuring MoviePy settings before import
   - Disabling watermarks (preview_watermark=False)
   - Removing all transitions
-  - Using concatenate_videoclips instead of CompositeVideoClip
+  - Using concatenate_videoclips with 'chain' method instead of 'compose'
+  - Skipping resize operations entirely
+  
+**Latest Findings**:
+- The error occurs specifically when MoviePy processes the last clip in the storyboard
+- Using 'chain' method works in isolated tests but still fails in full pipeline
+- The error message suggests MoviePy is trying to execute literal string "unset"
+- This might be related to async/background task environment variables
 
 ### TODO When Returning:
 1. **Fix Rendering Issue** (Priority #1):
